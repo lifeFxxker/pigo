@@ -1,0 +1,25 @@
+# ── 构建产物 ──
+target/
+/radial-launcher/target/
+/radial-launcher/dist/
+/radial-launcher/*.exe
+
+# ── 临时文件（项目约定：下划线前缀 = 用完即弃）──
+/radial-launcher/_*
+
+# ── 运行期数据（含本机个人路径 / 书签，不应入库）──
+# 首次运行会自动在 exe 同目录生成默认 settings.ini，无需提交
+/radial-launcher/settings.ini
+/radial-launcher/settings.ini.bak
+/radial-launcher/radial_log.txt
+/radial-launcher/draglog.txt
+/radial-launcher/*.bmp
+
+# 位图中间产物（都有对应的 .png，不必入库）
+*.bmp
+
+# ── 与源码无关 ──
+/.workbuddy/
+/radial-launcher - 副本/
+__pycache__/
+*.pyc

@@ -1,0 +1,3 @@
+// exe 图标资源。ID 用 1，托盘那边 LoadImageW(hinst, MAKEINTRESOURCE(1)) 取的就是它。
+// 图标由 make_icon.py 按中心头像球的真实几何生成（黑球 + 两只白色药丸眼）。
+1 ICON "app.ico"

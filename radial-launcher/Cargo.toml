@@ -1,0 +1,41 @@
+[package]
+name = "radial-launcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+windows-core = "0.58"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_DataExchange",
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
+    "implement",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Shutdown",
+    "Win32_System_Power",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_System_SystemInformation",
+    "Win32_System_Console",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false

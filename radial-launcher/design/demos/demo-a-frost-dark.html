@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Demo A · 经典毛玻璃（深色）</title>
+<style>
+:root{
+  --ease:cubic-bezier(.32,.72,0,1);
+  --pop:cubic-bezier(.34,1.3,.44,1);
+  --label:rgba(255,255,255,.60);
+  --label-hot:rgba(255,255,255,.95);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:#0d0d0f;color:rgba(255,255,255,.92);user-select:none;-webkit-user-select:none;cursor:default;
+}
+
+/* ── 壁纸：中性深灰 + 白色亮斑 ── */
+.bg{position:fixed;inset:0;transition:opacity .5s}
+.bg.off{opacity:0}
+#wp0{background:
+  radial-gradient(560px 420px at 16% 20%, rgba(255,255,255,.20) 0%, transparent 62%),
+  radial-gradient(620px 480px at 84% 16%, rgba(255,255,255,.14) 0%, transparent 62%),
+  radial-gradient(760px 560px at 58% 82%, rgba(255,255,255,.16) 0%, transparent 58%),
+  radial-gradient(900px 680px at 42% 46%, rgba(255,255,255,.08) 0%, transparent 55%),
+  linear-gradient(180deg,#0d0d0f,#131316 50%,#1a1a1e)}
+#wp1{background:
+  radial-gradient(700px 500px at 30% 25%, rgba(255,255,255,.12) 0%, transparent 60%),
+  repeating-linear-gradient(0deg, rgba(255,255,255,.09) 0 1px, transparent 1px 72px),
+  repeating-linear-gradient(90deg, rgba(255,255,255,.09) 0 1px, transparent 1px 72px),
+  linear-gradient(180deg,#0d0d0f,#17171a 50%,#1c1c20)}
+#wp2{background:
+  radial-gradient(640px 480px at 70% 18%, rgba(255,255,255,.17) 0%, transparent 60%),
+  radial-gradient(820px 600px at 22% 78%, rgba(255,255,255,.10) 0%, transparent 58%),
+  linear-gradient(180deg,#151517,#1d1d21 55%,#242428)}
+.blob{position:fixed;border-radius:50%;filter:blur(80px);opacity:.16;pointer-events:none;background:#fff}
+#b1{width:480px;height:480px;left:14%;top:16%;animation:drift 30s ease-in-out infinite alternate}
+#b2{width:420px;height:420px;right:12%;top:56%;animation:drift 36s ease-in-out infinite alternate-reverse}
+@keyframes drift{from{transform:translate(0,0)}to{transform:translate(120px,-80px)}}
+.grain{position:fixed;inset:0;pointer-events:none;opacity:.04;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* ── 玻璃圆盘：小盘仅内环 → hover 分类长大、外环环带出现 ── */
+#disc{
+  position:fixed;left:0;top:0;border-radius:50%;
+  display:none;pointer-events:none;z-index:10;
+  opacity:0;transition:opacity .24s ease-out;
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(255,255,255,.09);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:
+    0 24px 64px rgba(0,0,0,.35),
+    0 8px 24px rgba(0,0,0,.25),
+    inset 0 1px 0 rgba(255,255,255,.08);
+}
+#disc.on{opacity:1}
+#disc.off{opacity:0;transition:opacity .18s ease-in}
+
+#ring{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.sec{transition:fill .16s ease,stroke .16s ease,opacity .3s ease;stroke-width:1}
+.glow{transition:opacity .3s ease;filter:url(#b6)}
+
+.it{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;will-change:transform}
+.it .ic{font-size:22px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35));transition:transform .26s var(--pop)}
+.it .lb{font-size:11px;font-weight:500;letter-spacing:.02em;color:var(--label);transition:color .16s;white-space:nowrap}
+.it.hot .ic{transform:scale(1.2)}
+.it.hot .lb{color:var(--label-hot)}
+.it svg{width:24px;height:24px;stroke:var(--label);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;transition:stroke .16s}
+.it.hot svg{stroke:var(--label-hot)}
+
+#ctr{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  background:rgba(0,0,0,.14);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);transition:opacity .2s}
+#dot{width:6px;height:6px;border-radius:50%;background:#0A84FF;margin-bottom:3px;transition:background .2s}
+#nm{font-size:15px;font-weight:600;color:rgba(255,255,255,.92)}
+#hint{font-size:10.5px;color:rgba(255,255,255,.40);letter-spacing:.03em}
+
+/* ── 剪贴板列表卡片（圆环形变而来） ── */
+#card{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px 12px 12px;opacity:0}
+.chd{display:flex;align-items:center;justify-content:space-between;padding:6px 12px 10px;
+  border-bottom:1px solid rgba(255,255,255,.10);margin-bottom:8px}
+.c1{font-size:14px;font-weight:600;color:rgba(255,255,255,.92)}
+.c2{font-size:10.5px;color:rgba(255,255,255,.40);margin-top:2px}
+.cn{font-size:12px;color:rgba(255,255,255,.45)}
+.crow{display:flex;align-items:center;gap:10px;height:49px;padding:0 12px;border-radius:12px;transition:background .15s}
+.crow .ce{font-size:15px;width:22px;text-align:center;flex:none}
+.crow .ct{font-size:12.5px;color:rgba(255,255,255,.68);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s}
+.crow.hot{background:rgba(255,255,255,.10);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.crow.hot .ct{color:rgba(255,255,255,.95)}
+
+/* ── 页面 UI ── */
+.ui{position:fixed;z-index:20;display:flex;gap:8px}
+#tut{top:22px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:99px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);backdrop-filter:blur(20px);
+  font-size:12px;color:rgba(255,255,255,.60);transition:opacity .5s}
+#tut.hide{opacity:0;pointer-events:none}
+#tut b{color:rgba(255,255,255,.92);font-weight:600}
+#wps{bottom:20px;right:20px}
+.wpb{width:26px;height:26px;border-radius:50%;cursor:pointer;border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 2px 8px rgba(0,0,0,.4);transition:transform .15s,outline .15s;outline:2px solid transparent;outline-offset:2px}
+.wpb:hover{transform:scale(1.12)}
+.wpb.sel{outline-color:rgba(255,255,255,.65)}
+.wpb:nth-child(1){background:linear-gradient(135deg,#2a2a2e,#17171a)}
+.wpb:nth-child(2){background:repeating-linear-gradient(0deg,#3a3a3e 0 1px,#26262a 1px 8px)}
+.wpb:nth-child(3){background:linear-gradient(135deg,#333338,#232327)}
+#home{bottom:20px;left:20px}
+#home a{color:rgba(255,255,255,.5);font-size:12px;text-decoration:none;padding:7px 14px;border-radius:99px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(16px)}
+#home a:hover{color:rgba(255,255,255,.92)}
+#toast{position:fixed;left:50%;bottom:64px;transform:translateX(-50%) translateY(14px);z-index:30;
+  padding:10px 20px;border-radius:14px;font-size:13px;font-weight:500;color:rgba(255,255,255,.92);
+  background:rgba(30,30,34,.55);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(20px);
+  box-shadow:0 12px 32px rgba(0,0,0,.3),inset 0 1px 1px rgba(255,255,255,.14);
+  opacity:0;pointer-events:none;transition:opacity .3s var(--ease),transform .3s var(--ease)}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+#mark{position:fixed;top:20px;left:20px;font-size:11px;letter-spacing:.14em;color:rgba(255,255,255,.28);z-index:20}
+</style>
+</head>
+<body>
+
+<div class="bg" id="wp0"></div><div class="bg off" id="wp1"></div><div class="bg off" id="wp2"></div>
+<div class="blob" id="b1"></div><div class="blob" id="b2"></div>
+<div class="grain"></div>
+
+<div id="disc">
+  <svg id="ring" viewBox="0 0 300 300">
+    <defs><filter id="b6" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="7"/></filter></defs>
+    <g id="innerG"></g>
+    <g id="outerG" style="opacity:0"></g>
+  </svg>
+  <div id="cats"></div>
+  <div id="items"></div>
+  <div id="ctr"><div id="dot"></div><div id="nm">径向启动器</div><div id="hint">悬停分类展开外环</div></div>
+  <div id="card">
+    <div class="chd"><div><div class="c1">剪贴板</div><div class="c2">移动选择 · 松开粘贴</div></div><div class="cn">7 条</div></div>
+    <div id="clist"></div>
+  </div>
+</div>
+
+<div id="mark">PIGO · DEMO A</div>
+<div class="ui" id="tut">按住 <b>左键 / 中键 / 右键</b> 呼出 → 悬停分类展开外环 → <b>松开执行</b> · Esc 取消</div>
+<div class="ui" id="wps"><div class="wpb sel"></div><div class="wpb"></div><div class="wpb"></div></div>
+<div class="ui" id="home"><a href="index.html">← 返回 Demo 列表</a></div>
+<div id="toast"></div>
+
+<script>
+/* ═══ 引擎 v4：小盘仅内环 → 盘长大+外环环带出现；剪贴板形变为列表卡片 ═══ */
+const NS='http://www.w3.org/2000/svg';
+const GAP=3.2;
+
+const GEO={
+  R:   [150,230],
+  ctr: [ 58, 66],
+  in0: [ 74, 86],
+  in1: [126,138],
+  inMid:[100,112],
+  out0:[146,152],
+  out1:[152,224],
+  outMid:[150,188],
+};
+/* 剪贴板列表卡片尺寸 */
+const CARD={w:340,h:430,r:30,head:62,row:49};
+
+const IC={
+  grid:'<rect x="4" y="4" width="7" height="7" rx="2.2"/><rect x="13" y="4" width="7" height="7" rx="2.2"/><rect x="4" y="13" width="7" height="7" rx="2.2"/><rect x="13" y="13" width="7" height="7" rx="2.2"/>',
+  clip:'<rect x="5.5" y="4.5" width="13" height="16.5" rx="2.6"/><rect x="9" y="2.6" width="6" height="3.8" rx="1.3"/>',
+  sliders:'<path d="M4 7h8M16.5 7H20M4 12h3M11.5 12H20M4 17h10M18.5 17H20"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="16" cy="17" r="2"/>',
+  power:'<path d="M12 3.5v7.5"/><path d="M7.2 6.4a7.6 7.6 0 1 0 9.6 0"/>',
+};
+
+const CATS=[
+ {name:'应用',accent:'#0A84FF',icon:IC.grid,items:[
+   {l:'记事本',e:'📝'},{l:'计算器',e:'🧮'},{l:'画图',e:'🎨'},{l:'终端',e:'🖥️'},
+   {l:'资源管理',e:'📁'},{l:'音乐',e:'🎵'},{l:'邮件',e:'✉️'},{l:'浏览器',e:'🌐'}]},
+ {name:'剪贴板',accent:'#BF5AF2',icon:IC.clip,items:null},   // 形变为列表卡片
+ {name:'设置',accent:'#98989D',icon:IC.sliders,items:[
+   {l:'常用应用',e:'📌'},{l:'系统项',e:'🧩'},{l:'外观主题',e:'🎨'},{l:'开机自启',e:'⚡'}]},
+ {name:'系统',accent:'#FF9F0A',icon:IC.power,items:[
+   {l:'锁屏',e:'🔒'},{l:'睡眠',e:'🌙'},{l:'截图',e:'📸'},{l:'静音',e:'🔇'}]},
+];
+
+const CLIPS=[
+ {e:'🔗',t:'https://github.com/zcode/pigo/issues/128'},
+ {e:'📄',t:'会议纪要 v2：周四评审径向启动器动效'},
+ {e:'#️⃣',t:'0x8F2A-44C1-9B07'},
+ {e:'📅',t:'明早十点 conference call（链接已附）'},
+ {e:'📋',t:'产品反馈：1. 玻璃太透 2. 动效太快'},
+ {e:'☁️',t:'AWS ap-northeast-1 / t3.small'},
+ {e:'👤',t:'zhang.san@company.com'},
+];
+
+/* 主题填充参数（深色毛玻璃） */
+const TH={
+  ann:'rgba(255,255,255,.07)',        // 外环环带底盘
+  secStroke:'rgba(255,255,255,.14)',  // 扇区分隔线
+  outFill:'rgba(255,255,255,0)',      // 外环扇区默认（环带由底盘提供）
+  outHoverA:.26,
+  catFill:'rgba(255,255,255,.05)',
+  catHover:'rgba(255,255,255,.13)',
+  catOnA:.18,
+};
+
+const disc=document.getElementById('disc'),
+      ringSvg=document.getElementById('ring'),
+      innerG=document.getElementById('innerG'), outerG=document.getElementById('outerG'),
+      catsBox=document.getElementById('cats'), itemsBox=document.getElementById('items'),
+      ctrEl=document.getElementById('ctr'),
+      cardEl=document.getElementById('card'), clistEl=document.getElementById('clist'),
+      nmEl=document.getElementById('nm'), hintEl=document.getElementById('hint'), dotEl=document.getElementById('dot');
+
+let holding=false, expanded=false, activeCat=0, hover=null, phase='ring';
+let catSecs=[], catGlows=[], catEls=[], outSecs=[], outGlows=[], outEls=[], outAnn=null, rowEls=[];
+
+const G={t:0,R:150,C:150,ctr:58,in0:74,in1:126,inMid:100,out0:146,out1:152,outMid:150};
+
+let raf=0, entering=false, expanding=false, morphing=false;
+let entT0=0, expT0=0, itemT0=0, morphT0=0, mt=0;
+let cardFrom={w:300,h:300,br:150}, cardCur={w:300,h:300}, cardHoverIdx=-1;
+
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp01=v=>Math.max(0,Math.min(1,v));
+const easeOut=v=>1-Math.pow(1-v,3);
+const easeInOut=v=>v<.5?4*v*v*v:1-Math.pow(-2*v+2,3)/2;
+const midA=(i,n)=>-90+i*(360/n);
+const rgba=(hex,a)=>{const n=parseInt(hex.slice(1),16);return`rgba(${n>>16},${n>>8&255},${n&255},${a})`};
+
+const pt=(r,d)=>{const a=d*Math.PI/180;return[G.C+r*Math.cos(a),G.C+r*Math.sin(a)]};
+function sectorPath(r0,r1,a0,a1){
+  const la=a1-a0>180?1:0;
+  const[x0,y0]=pt(r1,a0),[x1,y1]=pt(r1,a1),[x2,y2]=pt(r0,a1),[x3,y3]=pt(r0,a0);
+  return`M${x0} ${y0}A${r1} ${r1} 0 ${la} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${la} 0 ${x3} ${y3}Z`;
+}
+function annulusPath(r0,r1){
+  return`M${G.C-r1} ${G.C}A${r1} ${r1} 0 1 0 ${G.C+r1} ${G.C}A${r1} ${r1} 0 1 0 ${G.C-r1} ${G.C}Z`+
+        `M${G.C-r0} ${G.C}A${r0} ${r0} 0 1 1 ${G.C+r0} ${G.C}A${r0} ${r0} 0 1 1 ${G.C-r0} ${G.C}Z`;
+}
+function mkPath(g,cls){const p=document.createElementNS(NS,'path');p.setAttribute('class',cls);g.appendChild(p);return p}
+function place(el,r,d){
+  const q=d+90;
+  el.style.left=G.C+'px';el.style.top=G.C+'px';
+  el.style.transform=`translate(-50%,-50%) rotate(${q}deg) translateY(${-r}px) rotate(${-q}deg)`;
+}
+
+function setGeo(t,s=1){
+  const L=(a,b)=>lerp(a,b,t)*s;
+  G.t=t;
+  G.R=L(...GEO.R); G.C=G.R;
+  G.ctr=L(...GEO.ctr);
+  G.in0=L(...GEO.in0); G.in1=L(...GEO.in1); G.inMid=L(...GEO.inMid);
+  G.out0=L(...GEO.out0); G.out1=L(...GEO.out1); G.outMid=L(...GEO.outMid);
+
+  disc.style.width=disc.style.height=(2*G.R)+'px';
+  disc.style.left=(disc._cx-G.R)+'px'; disc.style.top=(disc._cy-G.R)+'px';
+  ringSvg.setAttribute('viewBox',`0 0 ${2*G.R} ${2*G.R}`);
+  ctrEl.style.width=ctrEl.style.height=(2*G.ctr)+'px';
+
+  CATS.forEach((cat,i)=>{
+    const a=midA(i,4),hs=45-GAP/2;
+    const d=sectorPath(G.in0,G.in1,a-hs,a+hs);
+    catSecs[i].setAttribute('d',d); catGlows[i].setAttribute('d',d);
+    place(catEls[i],G.inMid,a);
+  });
+  if(outAnn)outAnn.setAttribute('d',annulusPath(G.out0,G.out1));
+  if(outSecs.length)layoutOuter();
+  outerG.style.opacity=Math.min(1,t*3);
+}
+
+function layoutOuter(){
+  const cat=CATS[activeCat],n=cat.items.length,per=360/n,hs=per/2-GAP/2;
+  outSecs.forEach((s,i)=>{
+    const a=midA(i,n);
+    s.setAttribute('d',sectorPath(G.out0,G.out1,a-hs,a+hs));
+    outGlows[i].setAttribute('d',sectorPath(G.out0,G.out1,a-hs,a+hs));
+  });
+}
+
+/* 内环 */
+CATS.forEach((cat,i)=>{
+  const glow=mkPath(innerG,'sec glow');
+  glow.setAttribute('filter','url(#b6)');glow.style.opacity=0;
+  const sec=mkPath(innerG,'sec');
+  const el=document.createElement('div');el.className='it';
+  el.innerHTML=`<svg viewBox="0 0 24 24">${cat.icon}</svg><div class="lb">${cat.name}</div>`;
+  catsBox.appendChild(el);
+  catGlows.push(glow);catSecs.push(sec);catEls.push(el);
+});
+
+/* 外环：底盘环带 + 分隔扇区 + 悬停辉光 */
+function buildOuter(ci){
+  outerG.innerHTML='';itemsBox.innerHTML='';
+  outSecs=[];outGlows=[];outEls=[];outAnn=null;
+  const cat=CATS[ci],n=cat.items.length,per=360/n,hs=per/2-GAP/2;
+  outAnn=mkPath(outerG,'sec');outAnn.setAttribute('fill-rule','evenodd');outAnn.setAttribute('stroke','none');
+  for(let i=0;i<n;i++){
+    outGlows.push(mkPath(outerG,'sec glow'));
+    const s=mkPath(outerG,'sec');
+    const it=cat.items[i];
+    const el=document.createElement('div');el.className='it';
+    el.innerHTML=`<div class="ic">${it.e}</div><div class="lb">${it.l}</div>`;
+    itemsBox.appendChild(el);
+    outSecs.push(s);outEls.push(el);
+  }
+  layoutOuter();
+}
+
+/* 剪贴板卡片 */
+function buildCard(){
+  clistEl.innerHTML='';rowEls=[];
+  CLIPS.forEach(c=>{
+    const r=document.createElement('div');r.className='crow';
+    r.innerHTML=`<div class="ce">${c.e}</div><div class="ct">${c.t}</div>`;
+    clistEl.appendChild(r);rowEls.push(r);
+  });
+}
+function layoutCard(){
+  const w=lerp(cardFrom.w,CARD.w,mt), h=lerp(cardFrom.h,CARD.h,mt), br=lerp(cardFrom.br,CARD.r,mt);
+  cardCur={w,h};
+  disc.style.width=w+'px'; disc.style.height=h+'px';
+  disc.style.borderRadius=br+'px';
+  disc.style.left=(disc._cx-w/2)+'px'; disc.style.top=(disc._cy-h/2)+'px';
+  catsBox.style.opacity=1-mt;
+  ctrEl.style.opacity=1-mt;
+  itemsBox.style.opacity=1-mt;
+  ringSvg.style.opacity=1-mt;
+  cardEl.style.opacity=Math.max(0,(mt-.4)/.6);
+}
+
+/* 单一 rAF 循环 */
+function tick(now){
+  raf=0; let more=false;
+  if(entering){
+    const k=easeOut(clamp01((now-entT0)/340));
+    setGeo(0,lerp(.8,1,k));
+    if(k<1)more=true; else entering=false;
+  }
+  if(expanding){
+    const k=easeOut(clamp01((now-expT0)/480));
+    setGeo(k);
+    if(k<1)more=true; else expanding=false;
+  }
+  if(morphing){
+    const k=easeInOut(clamp01((now-morphT0)/560));
+    mt=k;layoutCard();
+    if(k<1)more=true; else morphing=false;
+  }
+  if(phase==='ring'&&outEls.length){
+    const n=outEls.length; let done=true;
+    outEls.forEach((el,i)=>{
+      const p=easeOut(clamp01((now-itemT0-40-i*24)/420));
+      place(el,lerp(G.in1-6,G.outMid,p),midA(i,n));
+      el.style.opacity=p;
+      if(p<1)done=false;
+    });
+    if(!done)more=true;
+  }
+  if(more)raf=requestAnimationFrame(tick);
+}
+function kick(){ if(!raf)raf=requestAnimationFrame(tick) }
+
+function render(){
+  if(phase==='card'){
+    rowEls.forEach((r,i)=>r.classList.toggle('hot',i===cardHoverIdx));
+    return;
+  }
+  CATS.forEach((cat,i)=>{
+    const hv=hover&&hover.ring===0&&hover.i===i, on=i===activeCat;
+    catSecs[i].style.fill=on?rgba(cat.accent,TH.catOnA):hv?TH.catHover:TH.catFill;
+    catSecs[i].style.stroke=on?rgba(cat.accent,.45):TH.secStroke;
+    catGlows[i].style.fill=cat.accent;catGlows[i].style.opacity=on?.26:hv?.15:0;
+    catEls[i].classList.toggle('hot',!!hv);
+  });
+  const cat=CATS[activeCat];
+  if(outAnn)outAnn.style.fill=TH.ann;
+  outSecs.forEach((s,i)=>{
+    const hv=hover&&hover.ring===1&&hover.i===i;
+    s.style.fill=hv?rgba(cat.accent,TH.outHoverA):TH.outFill;
+    s.style.stroke=hv?rgba(cat.accent,.55):TH.secStroke;
+    if(outGlows[i]){outGlows[i].style.fill=cat.accent;outGlows[i].style.opacity=hv?.28:0}
+  });
+  outEls.forEach((el,i)=>el.classList.toggle('hot',!!(hover&&hover.ring===1&&hover.i===i)));
+  if(hover&&hover.ring===1){
+    nmEl.textContent=cat.items[hover.i].l;hintEl.textContent='松开启动';
+  }else if(hover&&hover.ring===0){
+    nmEl.textContent=cat.name;hintEl.textContent=expanded?cat.items.length+' 个项目 · 移入外环':'展开外环…';
+  }else{
+    nmEl.textContent='径向启动器';hintEl.textContent=expanded?'移动选择':'悬停分类展开外环';
+  }
+  dotEl.style.background=cat.accent;
+}
+
+function updateHover(x,y){
+  if(phase==='card'){
+    const inX=Math.abs(x-disc._cx)<=cardCur.w/2+10, inY=Math.abs(y-disc._cy)<=cardCur.h/2+10;
+    cardHoverIdx=-1;
+    if(inX&&inY){
+      const top=disc._cy-cardCur.h/2+CARD.head;
+      const i=Math.floor((y-top)/CARD.row);
+      if(i>=0&&i<CLIPS.length)cardHoverIdx=i;
+    }
+    render();return;
+  }
+  const dx=x-disc._cx, dy=y-disc._cy;
+  const r=Math.hypot(dx,dy);
+  let deg=Math.atan2(dy,dx)*180/Math.PI;deg=((deg%360)+360)%360;
+  const idx=(n)=>{const rel=((deg+90)%360+360)%360,per=360/n;return Math.round(rel/per)%n};
+  if(r>=G.in0-8&&r<=G.in1+10){
+    hover={ring:0,i:idx(4)};
+    if(!expanded)expand(hover.i);
+    else if(hover.i!==activeCat)switchCat(hover.i);
+  }else if(expanded&&r>=G.out0-8&&r<=G.out1+8){
+    hover={ring:1,i:idx(CATS[activeCat].items.length)};
+  }else hover=null;
+  render();
+}
+
+function expand(ci){
+  if(CATS[ci].items===null){enterCard();return}
+  expanded=true;activeCat=ci;
+  buildOuter(ci);
+  expT0=performance.now();itemT0=expT0;
+  expanding=true;
+  kick();
+}
+function switchCat(ci){
+  if(CATS[ci].items===null){enterCard();return}
+  activeCat=ci;
+  buildOuter(ci);
+  itemT0=performance.now();
+  kick();
+}
+
+/* 圆环 → 列表卡片 形变 */
+function enterCard(){
+  phase='card';expanded=true;activeCat=1;
+  entering=false;expanding=false;
+  cardFrom={w:2*G.R,h:2*G.R,br:G.R};
+  buildCard();
+  morphT0=performance.now();
+  morphing=true;
+  kick();
+}
+
+function show(x,y){
+  const vw=innerWidth,vh=innerHeight;
+  disc._cx=Math.min(Math.max(x,175),vw-175);
+  disc._cy=Math.min(Math.max(y,175),vh-175);
+  phase='ring';expanded=false;expanding=false;entering=true;morphing=false;activeCat=0;hover=null;mt=0;cardHoverIdx=-1;
+  cancelAnimationFrame(raf);raf=0;
+  outerG.innerHTML='';itemsBox.innerHTML='';outSecs=[];outGlows=[];outEls=[];outAnn=null;
+  disc.style.borderRadius='50%';
+  catsBox.style.opacity=1;ctrEl.style.opacity=1;itemsBox.style.opacity=1;cardEl.style.opacity=0;
+  disc.classList.remove('off');disc.style.display='block';
+  disc.getBoundingClientRect();
+  disc.classList.add('on');
+  entT0=performance.now();
+  setGeo(0,.8);
+  kick();
+  render();
+}
+function hide(){
+  cancelAnimationFrame(raf);raf=0;
+  entering=false;expanding=false;morphing=false;
+  disc.classList.remove('on');disc.classList.add('off');
+  setTimeout(()=>{if(!holding)disc.style.display='none'},200);
+}
+
+document.addEventListener('pointerdown',e=>{
+  if(e.target.closest('.ui'))return;
+  if(e.button===2)e.preventDefault();
+  if(holding)return;
+  holding=true;show(e.clientX,e.clientY);
+  document.getElementById('tut').classList.add('hide');
+});
+document.addEventListener('pointermove',e=>{if(holding)updateHover(e.clientX,e.clientY)});
+function release(){
+  if(!holding)return;holding=false;
+  if(phase==='card'&&cardHoverIdx>=0){
+    const s=CLIPS[cardHoverIdx].t;
+    toast(`已粘贴 · ${s.length>18?s.slice(0,18)+'…':s}`);
+  }else if(hover&&hover.ring===1){
+    toast(`已启动 · ${CATS[activeCat].items[hover.i].l}`);
+  }else if(hover&&hover.ring===0){
+    const c=CATS[activeCat];
+    toast(c.items?`已选择「${c.name}」`:`打开「${c.name}」`);
+  }
+  hide();
+}
+document.addEventListener('pointerup',release);
+document.addEventListener('pointercancel',release);
+document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault()});
+document.addEventListener('auxclick',e=>e.preventDefault());
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&holding){holding=false;hide()}});
+
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1600);
+}
+
+const bgs=['wp0','wp1','wp2'],wps=document.querySelectorAll('.wpb');
+wps.forEach((b,i)=>b.addEventListener('click',()=>{
+  bgs.forEach((id,j)=>document.getElementById(id).classList.toggle('off',j!==i));
+  wps.forEach((x,j)=>x.classList.toggle('sel',j===i));
+}));
+</script>
+</body>
+</html>

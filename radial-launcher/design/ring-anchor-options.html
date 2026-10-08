@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>外环起点锚定 · 三方案对照</title>
+<style>
+  :root{
+    --wall:#EEEEF0; --wall2:#E3E3E6; --paper:#FFFFFF; --ink:#1C1C1E;
+    --edge:color-mix(in srgb, var(--ink) 62%, var(--paper));
+    --soft:color-mix(in srgb, var(--ink) 13%, transparent);
+    --spring:cubic-bezier(.3,1.45,.45,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--wall); color:var(--ink);
+    font:500 13px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    padding:28px 22px 60px; -webkit-font-smoothing:antialiased;
+  }
+  h1{font-size:19px;font-weight:800;letter-spacing:-.2px}
+  .sub{color:color-mix(in srgb,var(--ink) 55%,transparent);margin-top:4px;font-size:12px}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:18px 0 6px}
+  .bar .lab{font-size:11px;font-weight:700;opacity:.5;letter-spacing:.6px;text-transform:uppercase;margin-right:2px}
+  button.tab,button.sc{
+    font:inherit;font-weight:700;font-size:12px;cursor:pointer;
+    background:var(--paper);color:var(--ink);
+    border:2px solid var(--edge); border-radius:999px;
+    padding:6px 14px; box-shadow:0 3px 0 var(--soft);
+    transition:transform .16s var(--spring),background .16s;
+  }
+  button.tab:hover,button.sc:hover{transform:translateY(-1px)}
+  button.tab.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  button.sc.on{background:color-mix(in srgb,var(--ink) 10%,var(--paper))}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:14px}
+  @media (max-width:1000px){.grid{grid-template-columns:1fr}}
+
+  .card{
+    background:var(--paper);border:2.5px solid var(--ink);border-radius:18px;
+    box-shadow:0 3px 0 var(--soft);padding:16px 16px 18px;
+    display:flex;flex-direction:column;gap:10px;position:relative;
+  }
+  .card.rec{border-width:3px}
+  .card h2{font-size:14px;font-weight:800;display:flex;align-items:center;gap:8px}
+  .badge{font-size:10px;font-weight:800;letter-spacing:.4px;padding:2px 8px;border-radius:999px;
+    background:var(--ink);color:var(--paper)}
+  .badge.keep{background:color-mix(in srgb,var(--ink) 12%,var(--paper));color:var(--ink)}
+  .card p{font-size:11.5px;color:color-mix(in srgb,var(--ink) 72%,transparent);min-height:52px}
+  .stage{background:var(--wall2);border-radius:14px;display:grid;place-items:center;overflow:hidden}
+  .stage svg{display:block;width:100%;height:auto}
+  .metrics{font-size:11px;border-top:2px dashed color-mix(in srgb,var(--ink) 18%,transparent);padding-top:9px;display:grid;gap:3px}
+  .metrics b{font-weight:800}
+  .metrics .ok{color:#1C1C1E}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;
+    background:var(--wall2);padding:1px 5px;border-radius:5px}
+  .note{margin-top:22px;background:var(--paper);border:2px solid var(--edge);border-radius:14px;
+    padding:14px 16px;font-size:12px;box-shadow:0 3px 0 var(--soft)}
+  .note h3{font-size:12.5px;font-weight:800;margin-bottom:7px}
+  .note ul{margin-left:16px;display:grid;gap:4px}
+  .legend{display:flex;gap:14px;font-size:11px;opacity:.65;margin-top:2px;flex-wrap:wrap}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>外环「起点锚定」三方案对照</h1>
+  <div class="sub">真实几何（<code>settings.ini</code> 里 12 个应用，K=0.66 / KI=0.72 / KC=1.34）。黄圈 = 当前选中的应用；蓝点 = 外环 chip 落点。</div>
+
+  <div class="bar">
+    <span class="lab">场景</span>
+    <button class="sc on" data-sc="terminal">终端 · 2 条（PowerShell / 控制台）</button>
+    <button class="sc" data-sc="explorer">资源管理器 · 4 条</button>
+    <button class="sc" data-sc="browser">浏览器 · 8 条</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="note">
+    <h3>方案之间的真正差别</h3>
+    <ul>
+      <li><b>A 起点锚定</b>：整圈 <b>依旧均布且完整</b>，只是把「第 1 个 chip」转到图标处。改动一行，风险为零；但 2 条时第 2 条仍在对面。</li>
+      <li><b>B 贴身扇面</b>：改用<b>最小间隙</b>排布并<b>以图标为中心</b>左右对称展开 → 条目少时全部贴着图标（终端 2 条只占 ±21°）。条目多时跨度自然变大（浏览器 8 条 271°），<b>不再强行补满 360°，会留一段空弧</b>。</li>
+      <li><b>C 混合（推荐）</b>：跨度 ≤ 240° 走 B（贴身、好点）；超过 240° 自动切回 A（整圈均布 + 起点锚定），兼顾「围满一圈」的观感。</li>
+      <li><b>⚠️ 顺带暴露的问题 —— 倾斜角</b>：贴弧胶囊的倾角来自切线角，应用落在 <b>3 点 / 9 点</b>方向时（比如上面的「终端」），chip 会接近<b>竖直</b>，文字变难读。方案 A/B 都躲不开，因为 chip 就落在图标旁边。
+        建议：把 <code>CHIP_TILT_MAX</code> 从 <b>58° 降到 38~42°</b>（牺牲一点「贴弧感」换可读性），或对贴身扇面单独用更保守的倾角。</li>
+    </ul>
+    <div class="legend" style="margin-top:9px">
+      <span><i class="dot" style="background:#F5C518"></i>选中应用热区</span>
+      <span><i class="dot" style="background:#2F6FED"></i>chip 中心落点（示意用色，实际 UI 仍是黑白灰）</span>
+      <span><i class="dot" style="background:#1C1C1E"></i>盘面 / 图标</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 与 src/main.rs 顶部常量一致 ──
+const K=0.66, KI=0.72, KC=1.34;
+const CC=720*K/2;
+const DISC_R=190*K, R_ICON=132*K, ICON_DRAW=56*KI;
+const CHIP_H=34*K*KC, CHIP_H2=CHIP_H/2;
+const CHIP_PAD_L=6*K*KC, CHIP_ICON=22*K*KC, CHIP_GAP=8*K*KC, CHIP_PAD_R=14*K*KC;
+const CHIP_MIN_GAP=12*K*KC;
+const CJK_W=13*K*KC, LAT_W=7*K*KC;
+const CHIP_TILT_K=0.82, CHIP_TILT_MAX=58;
+
+const estW = s => [...s].reduce((a,c)=>a+(c.codePointAt(0)>0x2E7F?CJK_W:LAT_W),0);
+const halfW = n => (CHIP_PAD_L+CHIP_ICON+CHIP_GAP+estW(n)+CHIP_PAD_R)/2;
+const polar=(r,d)=>{const a=d*Math.PI/180;return [r*Math.sin(a),-r*Math.cos(a)];};
+
+const SCEN={
+  terminal:{ai:3, names:['PowerShell','控制台'], label:'终端'},
+  explorer:{ai:4, names:['下载','文档','桌面','项目'], label:'资源管理器'},
+  browser:{ai:5, names:['豆包','GitHub','知乎','哔哩哔哩','百度','Marvis','Watt Toolkit','Open Design Beta'], label:'浏览器'},
+};
+const NAPPS=12;
+const APPS=['记事本','计算器','画图','终端','资源管理器','浏览器','设置','OpenDesign','暗黑2','MiniMax','墨刀','OpenShot'];
+const appAngle=(i,n)=>i*(360/n);
+
+// ── 布局 ──
+function baseGeom(names){
+  const m=names.length, tau=2*Math.PI;
+  const hs=names.map(halfW), s=hs.reduce((a,h)=>a+2*h,0);
+  const rMin=Math.max((s+CHIP_MIN_GAP*m)/tau, DISC_R+3*K+CHIP_H2);
+  return {m,tau,hs,s,rMin};
+}
+// A：整圈均布，chip[0] 中心锚定图标
+function layoutA(names,a0){
+  const {m,tau,hs,s,rMin}=baseGeom(names);
+  const r=rMin, gap=Math.max((tau*r-s)/m,2);
+  const c=[]; let acc=0;
+  for(let k=0;k<m;k++){c.push(acc+hs[k]);acc+=2*hs[k]+gap;}
+  return {r,angs:c.map(v=>a0+(v-c[0])/r*180/Math.PI)};
+}
+// B：最小间隙 + 以图标为中心
+function layoutB(names,a0){
+  const {m,tau,hs,s,rMin}=baseGeom(names);
+  const gap=CHIP_MIN_GAP;
+  const r=rMin;                       // 盘沿已足够大，不额外外扩
+  const c=[]; let acc=0;
+  for(let k=0;k<m;k++){c.push(acc+hs[k]);acc+=2*hs[k]+gap;}
+  const mid=(c[0]+c[m-1])/2;
+  return {r,angs:c.map(v=>a0+(v-mid)/r*180/Math.PI)};
+}
+// C：跨度 ≤240° 用 B，否则用 A
+function layoutC(names,a0){
+  const b=layoutB(names,a0);
+  const span=b.angs.length>1?b.angs[b.angs.length-1]-b.angs[0]:0;
+  return span<=240?b:layoutA(names,a0);
+}
+
+function chipRot(a){
+  const aa=((a%360)+360)%360;
+  let t;
+  if(aa<=90||aa>=270) t = aa>180? aa-360 : aa;
+  else t = aa-180;
+  return Math.max(-CHIP_TILT_MAX,Math.min(CHIP_TILT_MAX,t*CHIP_TILT_K));
+}
+
+// ── 绘制 ──
+const NAPPES=12;
+function svgDial(names, ai, layoutFn, opt){
+  const a0=appAngle(ai,NAPPES);
+  const lay=layoutFn(names,a0);
+  const span=lay.angs.length>1?Math.abs(lay.angs[lay.angs.length-1]-lay.angs[0]):0;
+  const rot=lay.angs.map(chipRot);
+
+  // 以「盘心」为原点作图，viewBox 贴合实际内容 → 卡片里能看得清
+  let E=DISC_R;
+  lay.angs.forEach((a,k)=>{
+    const [x,y]=polar(lay.r,a);
+    const hw=halfW(names[k]), r0=rot[k]*Math.PI/180;
+    [[hw,CHIP_H2],[hw,-CHIP_H2],[-hw,CHIP_H2],[-hw,-CHIP_H2]].forEach(([u,v])=>{
+      const px=x+u*Math.cos(r0)-v*Math.sin(r0);
+      const py=y+u*Math.sin(r0)+v*Math.cos(r0);
+      E=Math.max(E,Math.abs(px),Math.abs(py));
+    });
+  });
+  E+=10;
+
+  let out=`<svg viewBox="${-E} ${-E} ${E*2} ${E*2}" xmlns="http://www.w3.org/2000/svg">`;
+  const off=(x,y)=>[x,y];
+  const cx=0, cy=0;
+
+  // 盘中
+  out+=`<circle cx="${cx}" cy="${cy}" r="${DISC_R}" fill="#1C1C1E"/>`;
+  // 应用图标
+  for(let i=0;i<NAPPES;i++){
+    const [x,y]=off(...polar(R_ICON,appAngle(i,NAPPES)));
+    const on=i===ai;
+    if(on) out+=`<rect x="${x-19}" y="${y-19}" width="38" height="38" rx="12" fill="#F5C518" opacity=".16"/>`;
+    out+=`<rect x="${x-13}" y="${y-13}" width="26" height="26" rx="8"
+      fill="${on?'#FFFFFF':'#3A3A3E'}" stroke="${on?'#F5C518':'none'}" stroke-width="2"/>`;
+    out+=`<text x="${x}" y="${y+4}" text-anchor="middle" font-size="11" font-weight="700"
+      fill="${on?'#1C1C1E':'#EDEDEF'}" font-family="sans-serif">${APPS[i].slice(0,2)}</text>`;
+  }
+  // 中心球
+  out+=`<circle cx="${cx}" cy="${cy}" r="${66*K}" fill="#EDEDEF"/>`;
+  out+=`<ellipse cx="${cx-16*K}" cy="${cy}" rx="${9*K}" ry="${13*K}" fill="#1C1C1E"/>`;
+  out+=`<ellipse cx="${cx+16*K}" cy="${cy}" rx="${9*K}" ry="${13*K}" fill="#1C1C1E"/>`;
+
+  // chip 落点连线（可视化跨度）
+  if(lay.angs.length>1){
+    const p0=off(...polar(lay.r,lay.angs[0])), p1=off(...polar(lay.r,lay.angs[lay.angs.length-1]));
+    const large = Math.abs(lay.angs[lay.angs.length-1]-lay.angs[0])%360>180?1:0;
+    out+=`<path d="M ${p0[0]} ${p0[1]} A ${lay.r} ${lay.r} 0 ${large} 1 ${p1[0]} ${p1[1]}"
+      fill="none" stroke="#2F6FED" stroke-width="2" stroke-dasharray="5 5" opacity=".55"/>`;
+  }
+
+  // chips
+  lay.angs.forEach((a,k)=>{
+    const [x,y]=off(...polar(lay.r,a));
+    const hw=halfW(names[k]), rr=rot[k];
+    out+=`<g transform="translate(${x} ${y}) rotate(${rr})">`;
+    out+=`<rect x="${-hw}" y="${-CHIP_H2}" width="${hw*2}" height="${CHIP_H}"
+      rx="${CHIP_H2}" fill="#0C0C0E" opacity=".18" transform="translate(0 3)"/>`;
+    out+=`<rect x="${-hw}" y="${-CHIP_H2}" width="${hw*2}" height="${CHIP_H}"
+      rx="${CHIP_H2}" fill="#FFFFFF" stroke="#1C1C1E" stroke-width="2"/>`;
+    out+=`<rect x="${-hw+CHIP_PAD_L}" y="${-CHIP_ICON/2}" width="${CHIP_ICON}" height="${CHIP_ICON}"
+      rx="${CHIP_ICON*0.32}" fill="#1C1C1E"/>`;
+    out+=`<text x="${-hw+CHIP_PAD_L+CHIP_ICON/2}" y="${4}" text-anchor="middle" font-size="9"
+      font-weight="800" fill="#FFF" font-family="sans-serif">${names[k][0].toUpperCase()}</text>`;
+    out+=`<text x="${-hw+CHIP_PAD_L+CHIP_ICON+CHIP_GAP}" y="${4}" font-size="11" font-weight="600"
+      fill="#1C1C1E" font-family="sans-serif">${names[k]}</text>`;
+    out+=`</g>`;
+    out+=`<circle cx="${x}" cy="${y}" r="3.5" fill="#2F6FED" opacity=".85"/>`;
+  });
+  out+=`</svg>`;
+  return {svg:out, span, r:lay.r, rel:lay.angs.map(v=>Math.round(((v-a0+540)%360)-180))};
+}
+
+const OPTIONS=[
+  {id:'A',name:'A · 起点锚定',badge:'最小改动',badgeCls:'keep',fn:layoutA,
+   desc:'整圈仍然均布且完整，只把「第 1 条」转到图标方位角。改动最小、零风险，但条目少时后面的仍在对面。',
+   keepSpan:'360°'},
+  {id:'B',name:'B · 贴身扇面',badge:'',badgeCls:'',fn:layoutB,
+   desc:'改用最小间隙、以图标为中心向两侧对称铺开。条目少时全部贴身；条目多时自然摊开，不再强行补满一圈。',
+   keepSpan:'自然跨度'},
+  {id:'C',name:'C · 混合',badge:'推荐',badgeCls:'',fn:layoutC,
+   desc:'跨度 ≤ 240° 时走 B（贴身、好点）；超过 240° 自动切回 A（整圈 + 起点锚定），保留「围满一圈」的观感。',
+   keepSpan:'自适应'},
+];
+
+const grid=document.getElementById('grid');
+let curScen='terminal';
+function draw(){
+  const sc=SCEN[curScen];
+  grid.innerHTML=OPTIONS.map(o=>{
+    const {svg,span,r,rel}=svgDial(sc.names,sc.ai,o.fn,o);
+    return `<div class="card ${o.id==='C'?'rec':''}">
+      <h2>${o.name} ${o.badge?`<span class="badge ${o.badgeCls}">${o.badge}</span>`:''}</h2>
+      <p>${o.desc}</p>
+      <div class="stage">${svg}</div>
+      <div class="metrics">
+        <div>环半径 <b>${r.toFixed(0)}px</b> · 占用跨度 <b>${span.toFixed(0)}°</b> · 空弧 <b>${(360-span).toFixed(0)}°</b></div>
+        <div>chip 相对图标：<b>${rel.map(v=>(v>0?'+':'')+v+'°').join('  ')}</b></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+document.querySelectorAll('.sc').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.sc').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); curScen=b.dataset.sc; draw();
+});
+draw();
+</script>
+</body>
+</html>
