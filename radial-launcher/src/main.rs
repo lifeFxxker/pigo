@@ -1655,7 +1655,7 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
         }
 
         if let Some(tex) = &st.apps[i].icon {
-            draw_bgra_icon(buf, cx as i32, cy as i32, icon_side, tex, am);
+            draw_bgra_icon(buf, cx, cy, icon_side, tex, am);
         } else if let Some(ch) = st.apps[i].name.chars().next() {
             // 没有真实图标：淡色圆角方 + 同色字形（不用实色块）
             let half = icon_side * 0.5 * 0.86;
@@ -1786,8 +1786,15 @@ impl IconTex {
     fn from_base(px: usize, data: Vec<u8>) -> IconTex {
         let mut levels = vec![(px, data)];
         let mut cur = px;
+        // ⚠️ 步长决定最终质量：`pick` 返回「≥ size 的最小一级」，所以纹理/绘制比
+        // `k = tex_px / size` 恒落在 [1, 1.06]。
+        //
+        // 原来是 **1.4** → k ∈ [1, 1.4]，而**双线性在缩小 27% 时会漏掉高频**
+        // （三角核比足迹窄），于是边缘出现台阶状混叠 ——
+        // 用户 2026-10-09 报「内环 edge/墨刀、外环桌面/下载锯齿感很明显」就是这个。
+        // 1.06 让 k 几乎等于 1，重采样退化成「取最近的、几乎 1:1 的那一级」。
         while cur > 12 {
-            let next = ((cur as f32 / 1.4).round() as usize).max(6);
+            let next = ((cur as f32 / 1.06).round() as usize).max(6);
             if next >= cur {
                 break;
             }
@@ -1870,68 +1877,81 @@ fn downsample_box(src: &[u8], sw: usize, dw: usize) -> Vec<u8> {
     out
 }
 
-fn draw_bgra_icon(buf: &mut [u8], cx: i32, cy: i32, size: f32, tex: &IconTex, alpha: f32) {
+fn draw_bgra_icon(buf: &mut [u8], cx: f32, cy: f32, size: f32, tex: &IconTex, alpha: f32) {
     let (tex_px, data) = tex.pick(size);
-    if tex_px == 0 {
-        return;
-    }
     if alpha <= 0.01 || size <= 0.5 || tex_px == 0 || data.len() < tex_px * tex_px * 4 {
         return;
     }
     let n = tex_px as f32;
-    let half = size / 2.0;
+    let half = size * 0.5;
     let ext = half.ceil() as i32 + 1;
-    // 每个目标像素覆盖多少源纹素。mip 之后恒在 [1, 1.4] —— 只有很小的缩小比例，
-    // 所以 1~2 个抽头就够；真正把 2.8:1 那次大缩小交给加载时的 mip 生成。
+    // 每个目标像素覆盖多少源纹素。mip 步长 1.06 → 恒在 [1, 1.06]，
+    // 所以下面的足迹面积平均最多跨 2×2 个纹素。
     let k = n / size;
-    let span = (k * 0.5).clamp(0.35, 1.2);
-    let taps: i32 = if k > 1.15 { 2 } else { 1 };
-    // 采样偏移必须**关于中心对称**（旧式 taps=1 会偏到 -span 处，图标整体错半像素）
-    let step = 2.0 * span / taps as f32;
-    for py in (cy - ext).max(0)..(cy + ext).min(CANVAS) {
-        for px in (cx - ext).max(0)..(cx + ext).min(CANVAS) {
-            let fx = ((px as f32 + 0.5 - cx as f32) * k + (n - 1.0) / 2.0).clamp(0.0, n - 1.0);
-            let fy = ((py as f32 + 0.5 - cy as f32) * k + (n - 1.0) / 2.0).clamp(0.0, n - 1.0);
-            // 在源像素覆盖范围内均匀取 taps×taps 个样本，预乘后平均
-            let mut acc = [0.0f32; 4];
-            let mut cnt = 0.0f32;
-            for ty in 0..taps {
-                let syf =
-                    (fy + (ty as f32 + 0.5 - taps as f32 * 0.5) * step).clamp(0.0, n - 1.001);
-                let y0 = syf.floor();
-                let yi = y0 as usize;
-                let fyr = syf - y0;
-                let yi1 = (yi + 1).min(tex_px - 1);
-                for tx in 0..taps {
-                    let sxf =
-                        (fx + (tx as f32 + 0.5 - taps as f32 * 0.5) * step).clamp(0.0, n - 1.001);
-                    let x0 = sxf.floor();
-                    let xi = x0 as usize;
-                    let fxr = sxf - x0;
-                    let xi1 = (xi + 1).min(tex_px - 1);
-                    // 双线性取样（原来 `(sxf + 0.5) as usize` 是**最近邻** ——
-                    // 缩小 1.3 倍时等于点采样，细节全丢还带阶梯锯齿）
-                    for (yy2, wy) in [(yi, 1.0 - fyr), (yi1, fyr)] {
-                        for (xx2, wx) in [(xi, 1.0 - fxr), (xi1, fxr)] {
-                            // ⚠️ 步长必须是**实际纹理尺寸** `tex_px`，不能写 `ICON_PX` ——
-                            // `pe_png_icon` / 32px 回退会返回比 ICON_PX 小的纹理，
-                            // 用常量步长会读串行、图标直接花掉。
-                            let so = (yy2 * tex_px + xx2) * 4;
-                            let a = data[so + 3] as f32 / 255.0;
-                            let ww = wx * wy;
-                            acc[0] += data[so + 2] as f32 * a * ww;
-                            acc[1] += data[so + 1] as f32 * a * ww;
-                            acc[2] += data[so] as f32 * a * ww;
-                            acc[3] += a * ww;
-                            cnt += ww;
-                        }
-                    }
-                }
-            }
-            if cnt < 0.5 || acc[3] <= 1e-4 {
+    // 亚像素：中心不再取整（原来 `cx as i32` 是**截断**，最多错 1px，
+    // 边缘的 AA 会和底板对不齐、看起来发毛）。
+    let bx = cx.floor() as i32;
+    let by = cy.floor() as i32;
+    let fx0 = cx - bx as f32;                       // ∈ [0,1)
+    let fy0 = cy - by as f32;
+    // 足迹半宽（源纹素单位）
+    let hw = k * 0.5;
+    for iy in -ext..=ext {
+        let py = by + iy;
+        if py < 0 || py >= CANVAS {
+            continue;
+        }
+        for ix in -ext..=ext {
+            let px = bx + ix;
+            if px < 0 || px >= CANVAS {
                 continue;
             }
-            let a = (acc[3] / cnt) * alpha;
+            // 目标像素中心 → 源坐标（像素中心对像素中心的约定：
+            // 目标中心 -cx 时恰好落在源纹理中心）
+            let sx = (ix as f32 + 0.5 - fx0) * k + (n - 1.0) * 0.5;
+            let sy = (iy as f32 + 0.5 - fy0) * k + (n - 1.0) * 0.5;
+            // 足迹 = k×k，做**面积平均**。
+            // 这就是与缩小比匹配的抗混叠滤波 —— 2×2 抽头 + 双线性做不到这点，
+            // 双线性的三角核只覆盖 2 纹素宽，而足迹需要 k 纹素宽。
+            let x0f = sx - hw;
+            let x1f = sx + hw;
+            let y0f = sy - hw;
+            let y1f = sy + hw;
+            let ix0 = x0f.floor().max(0.0) as usize;
+            let ix1 = (x1f.ceil() as usize).min(tex_px);
+            let iy0 = y0f.floor().max(0.0) as usize;
+            let iy1 = (y1f.ceil() as usize).min(tex_px);
+            let mut acc = [0.0f32; 4];
+            for yy in iy0..iy1 {
+                let wy = (yy as f32 + 1.0).min(y1f) - (yy as f32).max(y0f);
+                if wy <= 0.0 {
+                    continue;
+                }
+                for xx in ix0..ix1 {
+                    let wx = (xx as f32 + 1.0).min(x1f) - (xx as f32).max(x0f);
+                    if wx <= 0.0 {
+                        continue;
+                    }
+                    // ⚠️ 步长必须是**实际纹理尺寸** `tex_px`，不能写 `ICON_PX` ——
+                    // `pe_png_icon` / 32px 回退会返回比 ICON_PX 小的纹理，
+                    // 用常量步长会读串行、图标直接花掉。
+                    let so = (yy * tex_px + xx) * 4;
+                    let a = data[so + 3] as f32 / 255.0;
+                    let ww = wx * wy;
+                    acc[0] += data[so + 2] as f32 * a * ww; // R
+                    acc[1] += data[so + 1] as f32 * a * ww; // G
+                    acc[2] += data[so] as f32 * a * ww;     // B
+                    acc[3] += a * ww;
+                }
+            }
+            // 分母用**理论足迹面积** k*k（而不是实际覆盖和）：
+            // 足迹越出纹理边界的部分按透明处理，边缘 alpha 才会正确衰减，
+            // 不会被「重归一化」抬高成硬边。
+            let wsum = k * k;
+            if wsum <= 0.0 || acc[3] <= 1e-5 {
+                continue;
+            }
+            let a = (acc[3] / wsum) * alpha;
             if a <= 0.004 {
                 continue;
             }
@@ -1963,13 +1983,17 @@ fn draw_bgra_icon_rot(buf: &mut [u8], cx: f32, cy: f32, size: f32,
     let ext = (half * 1.4143).ceil() as i32 + 1;
     let (sn, cs) = rot.sin_cos();
     let k = n / size;                                  // 每个目标像素覆盖多少源纹素
-    let span = (k * 0.5).clamp(0.35, 1.2);
-    let taps: i32 = if k > 1.15 { 2 } else { 1 };
-    let step = 2.0 * span / taps as f32;               // 源纹素单位
-    let off = step / k;                                // 换算到局部像素单位
-    let bx = cx.round() as i32;
-    let by = cy.round() as i32;
-    let w = CANVAS as usize;
+    // 亚像素（与非旋转版一致）。`i`/`j` 是相对 `bx`/`by` 的整数偏移，
+    // 目标像素中心相对 (bx,by) 的局部坐标 = i + 0.5 - f0。
+    let bx = cx.floor() as i32;
+    let by = cy.floor() as i32;
+    let fx0 = cx - bx as f32;
+    let fy0 = cy - by as f32;
+    // ⚠️ 旋转版没法直接按足迹做面积平均（足迹在纹理空间是个**旋转的**方块）。
+    // 近似做法：在**局部空间**做 N×N 亚样本的 box 积分，每个亚样本反旋到纹理空间
+    // 再双线性取样。k ≤ 1.06 → N=3 足够（采样点间距 1/3 局部像素）。
+    const N: i32 = 3;
+    let w_ = CANVAS as usize;
     for j in -ext..=ext {
         let py = by + j;
         if py < 0 || py >= CANVAS {
@@ -1981,11 +2005,11 @@ fn draw_bgra_icon_rot(buf: &mut [u8], cx: f32, cy: f32, size: f32,
                 continue;
             }
             let mut acc = [0.0f32; 4];
-            let mut cnt = 0.0f32;
-            for ty in 0..taps {
-                for tx in 0..taps {
-                    let lx = i as f32 + 0.5 + (tx as f32 + 0.5 - taps as f32 * 0.5) * off;
-                    let ly = j as f32 + 0.5 + (ty as f32 + 0.5 - taps as f32 * 0.5) * off;
+            let mut hit = 0.0f32;
+            for ty in 0..N {
+                for tx in 0..N {
+                    let lx = i as f32 + (tx as f32 + 0.5) / N as f32 - fx0;
+                    let ly = j as f32 + (ty as f32 + 0.5) / N as f32 - fy0;
                     // 反旋到「纹理」坐标
                     let ux = lx * cs + ly * sn;
                     let uy = -lx * sn + ly * cs;
@@ -1996,8 +2020,6 @@ fn draw_bgra_icon_rot(buf: &mut [u8], cx: f32, cy: f32, size: f32,
                     // 的图标（Edge / 设置 / chrome…）边缘像素是不透明的，后果两条：
                     //   ① 圆角被边缘像素填满 → 图标看起来是**直角**方
                     //   ② 方块旋转后没覆盖到的 4 个角也被涂上颜色 → **四个方向凸起**
-                    // 用户 2026-10-08 报的就是这两条；旋转角接近 0 的段看不出来，所以
-                    // 「有的正常，有的四个方向有突起」。
                     // 修法：落在纹理外就**直接丢这一份子样本**，绝不 clamp（clamp = 把内容
                     // 往外抹）。丢完之后画出来的轮廓正好是「随弧转的圆角方块」。
                     if ux.abs() > half || uy.abs() > half {
@@ -2020,20 +2042,27 @@ fn draw_bgra_icon_rot(buf: &mut [u8], cx: f32, cy: f32, size: f32,
                             acc[1] += data[so + 1] as f32 * a * ww;
                             acc[2] += data[so] as f32 * a * ww;
                             acc[3] += a * ww;
-                            cnt += ww;
+                            hit += ww;
                         }
                     }
                 }
             }
-            if cnt < 0.5 || acc[3] <= 1e-4 {
+            // 分母 = N*N（理论亚样本数）→ 落在圆角外的子样本按透明计，
+            // 边缘 alpha 正确衰减（不能拿 `hit` 当分母，那会把边"补满"成硬直角）。
+            let _ = hit;
+            let denom = (N * N) as f32;
+            if acc[3] <= 1e-5 {
                 continue;
             }
-            let a = (acc[3] / cnt) * alpha;
+            let a = (acc[3] / denom) * alpha;
             if a <= 0.004 {
                 continue;
             }
-            let o = (py as usize * w + px as usize) * 4;
-            blend_over(buf, o, acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3], a);
+            let r = acc[0] / acc[3];
+            let g = acc[1] / acc[3];
+            let b = acc[2] / acc[3];
+            let o = (py as usize * w_ + px as usize) * 4;
+            blend_over(buf, o, r, g, b, a);
         }
     }
 }
