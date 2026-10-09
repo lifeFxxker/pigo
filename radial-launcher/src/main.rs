@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::time::Instant;
 
 use windows::core::PCWSTR;
+use windows::core::PWSTR;
 use windows::core as windows_core;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
@@ -152,6 +153,9 @@ const WM_APP_DISMISS_FG: u32 = WM_APP + 18;
 const WM_APP_RHOLDSIM: u32 = WM_APP + 19;
 /// 只在内部用：叫醒钩子线程去同步键盘钩子的「线程消息」（内容无所谓）。
 const WM_APP_HOOK_SYNC: u32 = WM_APP + 21;
+/// 后台「这个网址是不是已经开着」查完了（结果在 `LOAD_HIT`，动作在处理器里做）。
+/// ⚠️ 这个查询要联网+UI Automation，**绝不能同步跑在 UI 线程上**（会冻住整圈 2~3 秒）。
+const WM_APP_LOADED: u32 = WM_APP + 23;
 // 仅测试：直接驱动右键状态机（`w`：0=喂 RBUTTONDOWN / 1=喂 RBUTTONUP / 2=查询）。
 // 为什么不注入真实鼠标事件来测：测试进程注入输入 + 我们装着全局钩子，
 // 两边会互相卡死（实测整个测试挂死）。直接喂事件码安全且确定。
@@ -197,6 +201,34 @@ static DRAG_ACTIVE: AtomicBool = AtomicBool::new(false); // OLE 拖放进行中�
 static DRAG_SEEN: AtomicBool = AtomicBool::new(false);   // 本次呼出期间见过拖放
 static DROP_PT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 static DROP_PAYLOAD: std::sync::Mutex<Vec<DropItem>> = std::sync::Mutex::new(Vec::new());
+
+// ── 「网址是不是已经开着」的**后台查询**（见 switch_bg）
+static LOAD_HIT: AtomicBool = AtomicBool::new(false); // 后台查询结果：命中已开标签
+/// url → 网页标题 的小缓存：第二次点同一个网址就不用再联网（省掉最贵的 0.5~1.2 秒）。
+/// ⚠️ 只信缓存会漏判（标题会变）→ 缓存没命中才去联网重抓一次。
+static SWITCH_CACHE: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn cache_get(url: &str) -> Option<String> {
+    SWITCH_CACHE
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(u, _)| u == url)
+        .map(|(_, t)| t.clone())
+}
+
+fn cache_put(url: &str, title: &str) {
+    if let Ok(mut c) = SWITCH_CACHE.lock() {
+        if let Some(e) = c.iter_mut().find(|(u, _)| u == url) {
+            e.1 = title.to_string();
+        } else {
+            if c.len() >= 64 {
+                c.remove(0);
+            }
+            c.push((url.to_string(), title.to_string()));
+        }
+    }
+}
 static DROP_MODE_ARMED: AtomicBool = AtomicBool::new(false); // 菜单处于拖放等待态（钩子线程读）
 
 /// 拖放链路诊断日志（exe 目录 draglog.txt）
@@ -555,8 +587,8 @@ struct State {
     mood_hold: f64,
     /// 正被拖出的应用（None = 没在拖）
     drag_app: Option<usize>,
-    /// 拖拽中光标下方的**另一个**槽位（松手时与它交换位置）。
-    /// 内环/外环分开：跨层换位（应用 ↔ 外环条目）没有意义。
+    /// 拖拽中光标下方的**目标槽位**（松手时把拖起项插入到这里、其余顺移）。
+    /// 内环/外环分开：跨层排序（应用 ↔ 外环条目）没有意义。
     drag_over_app: Option<usize>,
     drag_over_chip: Option<usize>,
     /// 正被拖出的外环胶囊 (应用槽位, item 序号)
@@ -566,6 +598,11 @@ struct State {
     drag_y: f32,
     /// 拖出淡出进度 0→1（1 = 完全淡掉）
     drag_fade: f32,
+    /// 正在后台查「这个网址是不是已经开着」：`(应用, 条目)` = 哪一段显示 loading 动画。
+    /// 期间菜单**保持可见**（宠物切「忙碌」表情），查完再隐藏并动作。
+    loading: Option<(usize, usize)>,
+    /// 上面那次查询对应的网址（查完要拿它决定「切过去」还是「照常打开」）
+    loading_url: String,
     /// 等待确认移除的内容 —— **已经从盘面摘下**，所以立即不可见；
     /// 超时落盘、点取消或收起菜单都原位放回
     /// 待确认移除的队列。**可以同时有多个** —— 拖走一个之后要能立刻拖下一个，
@@ -710,6 +747,8 @@ impl State {
             drag_x: 0.0,
             drag_y: 0.0,
             drag_fade: 0.0,
+            loading: None,
+            loading_url: String::new(),
             pending_rms: Vec::new(),
             cancel_a: 0.0,
             last_input: 0.0,
@@ -1775,6 +1814,8 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
                 draw_ring_sector(buf, &pal, ring_in, ring_out, seg,
                                  if editing { 0.0 } else { hot_k }, am,
                                  if editing { 1 } else { 0 });
+                // 这一段正是后台查询中 → 把名字换成 loading 动画
+                let loading = st.loading == Some((ai, j));
                 draw_ring_content(
                     st, buf, &pal, seg, ring_in, ring_out,
                     st.apps[ai].items[j].icon.as_ref(),
@@ -1784,7 +1825,7 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
                         st.apps[ai].items[j].name.as_str()
                     },
                     if editing { (255, 255, 255) } else { pal.ink },
-                    hot_k, editing, am,
+                    hot_k, editing, am, loading,
                 );
 
                 if st.commit_pulse > 0.0 && st.commit_chip == j {
@@ -2500,6 +2541,57 @@ fn nearest_app(st: &State, px: f32, py: f32, slack: f32) -> Option<usize> {
     }
 }
 
+/// 拖拽落点（内环）＝按**角度吸附**到最近的应用槽位。
+/// 与 `nearest_app` 的关键区别：**不要求光标贴住某个图标** —— 落在两个图标之间的
+/// **空隙**里也能命中（用户 2026-10-09：拖到两个图标中间「没反应、插不进去」，
+/// 就是因为旧判定要求光标到图标中心 ≤ 图标半宽+7，缝隙处到两侧都太远 → 落空 → 当作放弃）。
+/// 径向只要求在图标环带附近：太靠内（盘心）/ 太靠外 → 放弃。
+fn drop_slot_app(st: &State, px: f32, py: f32) -> Option<usize> {
+    let n = st.apps.len();
+    if n == 0 {
+        return None;
+    }
+    let dx = px - CC;
+    let dy = py - CC;
+    let r = (dx * dx + dy * dy).sqrt();
+    let (r_icon, icon_sz) = ring_layout(n);
+    if (r - r_icon).abs() > icon_sz * 0.5 + 18.0 {
+        return None;
+    }
+    let per = 360.0 / n as f32;
+    let deg = dx.atan2(-dy).to_degrees().rem_euclid(360.0);
+    Some(((deg / per).round() as usize).rem_euclid(n))
+}
+
+/// 拖拽落点（外环）＝按**角度吸附**到最近的外环段（允许落在段间的缝里）。
+fn drop_slot_chip(st: &State, ai: usize, px: f32, py: f32) -> Option<usize> {
+    if ai >= st.apps.len() || st.apps[ai].items.is_empty() {
+        return None;
+    }
+    let (segs, _rots, _rads) = chip_layout(st, ai);
+    let (r_in, r_out) = ring_radii(st.apps.len());
+    let dx = px - CC;
+    let dy = py - CC;
+    let r = (dx * dx + dy * dy).sqrt();
+    let tol = 10.0;
+    if r < r_in - tol || r > r_out + tol {
+        return None;
+    }
+    // 段中心角最接近光标的那个段（缝里也归到最近的一段）
+    let th = dx.atan2(-dy).to_degrees();
+    let mut best: Option<usize> = None;
+    let mut best_d = f32::MAX;
+    for (j, (a1, a2)) in segs.iter().enumerate() {
+        let mut d = th - (a1 + a2) * 0.5;
+        d = ((d + 180.0).rem_euclid(360.0)) - 180.0;
+        if d.abs() < best_d {
+            best_d = d.abs();
+            best = Some(j);
+        }
+    }
+    best
+}
+
 /// 拖放落点 → 归属应用：图标磁贴 > 外环胶囊 > 盘面以内（当前亮着的应用）
 fn drop_force_app(st: &State, sx: i32, sy: i32) -> Option<usize> {
     let px = sx - st.win_x;
@@ -2752,10 +2844,387 @@ fn ini_insert_app(path: &str, key: &str, value: &str) -> bool {
     std::fs::write(path, out).is_ok()
 }
 
+// ─────────────── 「已打开 → 直接展示」 ───────────────
+// 启动前先看这个程序是不是**已经在跑**：是就把它的窗口还原 + 置前，不再重复启动。
+// （用户 2026-10-09：再点一次 idea 没反应，应该把已开的窗口弹到最前面。）
+
+/// 进程 PID → 映像文件全路径（小写；失败返回 None）。
+unsafe fn process_image(pid: u32) -> Option<String> {
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+    let mut buf = [0u16; 1024];
+    let mut n = buf.len() as u32;
+    let r = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut n);
+    let _ = CloseHandle(h);
+    r.ok()?;
+    Some(String::from_utf16_lossy(&buf[..n as usize]).to_ascii_lowercase())
+}
+
+/// 目标 → 「用来找已开窗口的 exe 路径」。
+/// `.lnk` 解析出快捷方式目标；`.exe` 原样；URL / `shell:` / 文件夹 → None（没有可聚焦的进程）。
+unsafe fn resolve_target_exe(target: &str) -> Option<String> {
+    use windows::Win32::System::Com::{
+        CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_UNCPRIORITY};
+    use windows_core::Interface;
+    let t = target.trim();
+    let low = t.to_ascii_lowercase();
+    if low.ends_with(".exe") {
+        return Some(t.to_string());
+    }
+    if !low.ends_with(".lnk") {
+        return None;
+    }
+    let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+    let pf: IPersistFile = link.cast().ok()?;
+    let w: Vec<u16> = t.encode_utf16().chain(std::iter::once(0)).collect();
+    pf.Load(PCWSTR(w.as_ptr()), STGM_READ).ok()?;
+    let mut buf = [0u16; 1024];
+    link.GetPath(&mut buf, ptr::null_mut(), SLGP_UNCPRIORITY.0 as u32).ok()?;
+    let n = buf.iter().position(|&c| c == 0).unwrap_or(0);
+    if n == 0 {
+        None
+    } else {
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+}
+
+struct WinSearch<'a> {
+    want: &'a str,  // 小写
+    bare: bool,     // want 不含路径分隔符 → 只比文件名
+    found: Option<HWND>,
+}
+
+/// 找「同一个程序的已开顶层窗口」。
+unsafe fn find_window_of_exe(exe: &str) -> Option<HWND> {
+    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let s = &mut *(lp.0 as *mut WinSearch);
+        if s.found.is_some() {
+            return BOOL(0);
+        }
+        if !IsWindowVisible(hwnd).as_bool() || GetWindowTextLengthW(hwnd) == 0 {
+            return BOOL(1);
+        }
+        // 桌面 / 任务栏这些外壳窗口也是 explorer.exe 的，别当成「应用窗口」
+        let mut cls = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut cls).max(0) as usize;
+        let c = String::from_utf16_lossy(&cls[..n.min(cls.len())]);
+        if matches!(
+            c.as_str(),
+            "Progman"
+                | "WorkerW"
+                | "Shell_TrayWnd"
+                | "Shell_SecondaryTrayWnd"
+                | "Windows.UI.Core.CoreWindow"
+                | "RLHost"
+                | "RLRing"
+        ) {
+            return BOOL(1);
+        }
+        // 工具窗口 / 无主窗口的浮窗：跳过
+        let ex = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
+        if ex.0 & WS_EX_TOOLWINDOW.0 != 0 {
+            return BOOL(1);
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 || pid == std::process::id() {
+            return BOOL(1);
+        }
+        if let Some(p) = process_image(pid) {
+            let hit = if s.bare {
+                p.rsplit(['\\', '/']).next().unwrap_or(&p) == s.want
+            } else {
+                p == s.want
+            };
+            if hit {
+                s.found = Some(hwnd);
+                return BOOL(0);
+            }
+        }
+        BOOL(1)
+    }
+    let want = exe.trim().to_ascii_lowercase();
+    let bare = !want.contains('\\') && !want.contains('/');
+    let mut s = WinSearch { want: want.as_str(), bare, found: None };
+    let _ = EnumWindows(Some(cb), LPARAM(&mut s as *mut _ as isize));
+    s.found
+}
+
+/// 把窗口还原 + 置前。
+/// ⚠️ `SW_RESTORE` **只在最小化时**调 —— 对最大化的窗口调它会把窗口缩回来。
+/// ⚠️ 我们的窗口是 `WS_EX_NOACTIVATE`，从不成为前台进程 → 必须用 `AttachThreadInput`
+/// 把本线程挂到**当前前台线程**的输入队列上，才能绕过前台锁让 `SetForegroundWindow` 生效。
+unsafe fn focus_window(hwnd: HWND) {
+    // ⚠️ `AttachThreadInput` 在 windows crate 里归在 `System::Threading`（不是 UI 模块）
+    use windows::Win32::System::Threading::AttachThreadInput;
+    let fg = GetForegroundWindow();
+    let fg_tid = GetWindowThreadProcessId(fg, None);
+    let my_tid = GetCurrentThreadId();
+    let attached =
+        fg_tid != 0 && fg_tid != my_tid && AttachThreadInput(my_tid, fg_tid, true).as_bool();
+    if IsIconic(hwnd).as_bool() {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+    }
+    let _ = BringWindowToTop(hwnd);
+    let _ = SetForegroundWindow(hwnd);
+    if attached {
+        let _ = AttachThreadInput(my_tid, fg_tid, false);
+    }
+}
+
+// ─────────────── 网址：已打开就切到那个标签 ───────────────
+// ⚠️ Windows 没有任何 API 能读「某个标签页的 URL」—— UI Automation 里标签页**只暴露标题**。
+//    所以做法只能是：打开网址前先抓这个网址的 `<title>`，再拿标题去比对浏览器所有标签，
+//    命中就切过去；抓不到/对不上就照常新开（**只会漏判，不会切错**）。
+
+fn is_url(t: &str) -> bool {
+    let l = t.trim().to_ascii_lowercase();
+    l.starts_with("http://") || l.starts_with("https://") || l.starts_with("file:///")
+}
+
+/// 标题规范化：小写 + 压掉连续空白。
+/// 浏览器标签标题会带「 - 已固定」「 - 选项卡组 X 的一部分」这类后缀，靠前缀/包含匹配兜住。
+fn norm_title(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// 抽第一个 `<title>`。
+/// ⚠️ `to_ascii_lowercase()` 只改 ASCII 字母、**不改变字节长度** → 可以用同一套下标切片。
+fn extract_title(html: &str) -> Option<String> {
+    let low = html.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(pos) = low[from..].find("<title") {
+        let i = from + pos;
+        let gt = html[i..].find('>')?;
+        let start = i + gt + 1;
+        let end = low[start..].find("</title")?;
+        let t = norm_title(&html[start..start + end]);
+        if !t.is_empty() {
+            return Some(t);
+        }
+        from = start + end + 8;
+    }
+    None
+}
+
+/// 取网页标题：`file:///` 直接读本地文件；http(s) 走 WinINet（短超时，失败就放弃）。
+unsafe fn fetch_page_title(url: &str) -> Option<String> {
+    use windows::Win32::Networking::WinInet::*;
+    let u = url.trim();
+    if u.to_ascii_lowercase().starts_with("file:///") {
+        let p = u[8..].replace('/', "\\");
+        return extract_title(&String::from_utf8_lossy(&std::fs::read(p).ok()?));
+    }
+    let agent = wide("RadialLauncher/0.1");
+    let h = InternetOpenW(
+        PCWSTR(agent.as_ptr()),
+        INTERNET_OPEN_TYPE_PRECONFIG.0,
+        PCWSTR::null(),
+        PCWSTR::null(),
+        0,
+    );
+    if h.is_null() {
+        return None;
+    }
+    let ms: u32 = 1200;
+    let pms = &ms as *const u32 as *const c_void;
+    for opt in [
+        INTERNET_OPTION_CONNECT_TIMEOUT,
+        INTERNET_OPTION_SEND_TIMEOUT,
+        INTERNET_OPTION_RECEIVE_TIMEOUT,
+    ] {
+        let _ = InternetSetOptionW(Some(h as *const c_void), opt, Some(pms), 4);
+    }
+    let uw = wide(u);
+    let uh = InternetOpenUrlW(
+        h as *const c_void,
+        PCWSTR(uw.as_ptr()),
+        None,
+        INTERNET_FLAG_RELOAD,
+        0,
+    );
+    let mut html = Vec::<u8>::new();
+    if !uh.is_null() {
+        let mut buf = [0u8; 8192];
+        loop {
+            let mut read = 0u32;
+            let ok = InternetReadFile(
+                uh as *const c_void,
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len() as u32,
+                &mut read,
+            )
+            .is_ok();
+            if !ok || read == 0 {
+                break;
+            }
+            html.extend_from_slice(&buf[..read as usize]);
+            if html.len() > 262_144 {
+                break;
+            }
+        }
+        let _ = InternetCloseHandle(uh as *const c_void);
+    }
+    let _ = InternetCloseHandle(h as *const c_void);
+    extract_title(&String::from_utf8_lossy(&html))
+}
+
+/// 标题匹配打分：精确 3 > 前缀 2 > 包含 1。
+/// ⚠️ 「包含」要求 ≥6 个字符，否则「首页」这种泛词会把一堆标签乱配。
+fn title_score(tab: &str, page: &str) -> i32 {
+    if tab.is_empty() || page.is_empty() {
+        return 0;
+    }
+    if tab == page {
+        return 3;
+    }
+    if tab.starts_with(page) {
+        return 2;
+    }
+    if page.chars().count() >= 6 && tab.contains(page) {
+        return 1;
+    }
+    0
+}
+
+/// 收集某窗口类的可见顶层窗口（Chromium 系浏览器都是 `Chrome_WidgetWin_1`）。
+unsafe fn windows_of_class(cls: &str) -> Vec<HWND> {
+    struct Scan<'a> {
+        cls: &'a str,
+        out: Vec<HWND>,
+    }
+    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let s = &mut *(lp.0 as *mut Scan);
+        if !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+        let mut b = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut b).max(0) as usize;
+        if String::from_utf16_lossy(&b[..n.min(b.len())]).eq_ignore_ascii_case(s.cls) {
+            s.out.push(hwnd);
+        }
+        BOOL(1)
+    }
+    let mut s = Scan { cls, out: Vec::new() };
+    let _ = EnumWindows(Some(cb), LPARAM(&mut s as *mut _ as isize));
+    s.out
+}
+
+/// 在浏览器里找标题命中的标签页 → 选中它（= 切换过去）。返回该浏览器窗口。
+unsafe fn select_tab_by_title(page_title: &str) -> Option<HWND> {
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationSelectionItemPattern, TreeScope_Descendants,
+        UIA_SelectionItemPatternId, UIA_TabItemControlTypeId,
+    };
+    let p = norm_title(page_title);
+    if p.chars().count() < 2 {
+        return None;
+    }
+    let ui: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+    let cond = ui.CreateTrueCondition().ok()?;
+    let mut best: Option<(i32, HWND, IUIAutomationSelectionItemPattern)> = None;
+    for hw in windows_of_class("Chrome_WidgetWin_1") {
+        let Ok(root) = ui.ElementFromHandle(hw) else {
+            continue;
+        };
+        let Ok(arr) = root.FindAll(TreeScope_Descendants, &cond) else {
+            continue;
+        };
+        for i in 0..arr.Length().unwrap_or(0) {
+            let Ok(e) = arr.GetElement(i) else { continue };
+            // 只认标签页元素
+            if e.CurrentControlType().map(|c| c.0).unwrap_or(-1) != UIA_TabItemControlTypeId.0 {
+                continue;
+            }
+            let Ok(name) = e.CurrentName() else { continue };
+            let sc = title_score(&norm_title(&name.to_string()), &p);
+            if sc == 0 {
+                continue;
+            }
+            if best.as_ref().map(|(b, _, _)| sc > *b).unwrap_or(true) {
+                if let Ok(pat) = e
+                    .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
+                {
+                    best = Some((sc, hw, pat));
+                }
+            }
+        }
+    }
+    let (_, hw, pat) = best?;
+    if !pat.CurrentIsSelected().map(|b| b.as_bool()).unwrap_or(false) {
+        let _ = pat.Select();
+    }
+    Some(hw)
+}
+
+/// 网址已经开着 → 切到那个标签并置前。返回 false = 没开（调用方照常打开）。
+/// ⚠️ 慢（联网 + UI Automation 共 0.5~2 秒）→ **只能从后台线程调**（见 `switch_bg`）。
+unsafe fn switch_to_open_tab(url: &str) -> bool {
+    // 没有 Chromium 系浏览器在跑就别联网抓标题了（省掉最贵的那一步）
+    if windows_of_class("Chrome_WidgetWin_1").is_empty() {
+        return false;
+    }
+    // ① 先试标题缓存（不联网，最快）
+    if let Some(t) = cache_get(url) {
+        if let Some(hw) = select_tab_by_title(&t) {
+            focus_window(hw);
+            return true;
+        }
+    }
+    // ② 缓存没中（或标题变了）→ 联网重抓一次再试
+    let Some(t) = fetch_page_title(url) else {
+        return false;
+    };
+    cache_put(url, &t);
+    match select_tab_by_title(&t) {
+        Some(hw) => {
+            focus_window(hw);
+            true
+        }
+        None => false,
+    }
+}
+
+/// **后台**执行上面那件事，完成后 post `WM_APP_LOADED` 让 UI 线程收尾。
+/// ⚠️ 必须有自己的 `CoInitializeEx`（UIA 的 `CUIAutomation` 是 COM 对象；
+/// 拿 UI 线程的 COM 公寓跨线程用会直接失败）。
+fn switch_bg(url: String) {
+    std::thread::spawn(move || {
+        let hit = unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+            );
+            switch_to_open_tab(&url)
+        };
+        LOAD_HIT.store(hit, Ordering::SeqCst);
+        unsafe { post(WM_APP_LOADED, 0, 0) };
+    });
+}
+
 // ───────────────────── 执行 ─────────────────────
 
 fn launch(target: &str) {
     unsafe {
+        // 网址已经开着 → 切到那个标签并置前
+        if is_url(target) && switch_to_open_tab(target) {
+            println!("[*] 切到已打开网页 · {target}");
+            return;
+        }
+        // 目标程序**已经在跑** → 只把它的窗口弹到最前，不再重复启动
+        if let Some(exe) = resolve_target_exe(target) {
+            if let Some(hw) = find_window_of_exe(&exe) {
+                focus_window(hw);
+                println!("[*] 聚焦已开窗口 · {target}");
+                return;
+            }
+        }
         let p = wide(target);
         let _ = ShellExecuteW(
             HWND(ptr::null_mut()),
@@ -2785,11 +3254,40 @@ fn commit(st: &mut State) {
         _ => None,
     };
 
-    if let Some((ai, ci, _, _)) = action {
+    if let Some((ai, ci, _, _)) = action.clone() {
         st.commit_app = ai;
         st.commit_chip = ci.unwrap_or(usize::MAX);
         st.commit_pulse = 1.0;
     }
+
+    // ── 网址 + 浏览器在跑 → **异步**查「是不是已经开着」──
+    // ⚠️⚠️ 绝不能同步做：抓标题（联网）+ UI Automation 扫标签要 1~2.5 秒，
+    // 同步跑会把 UI 线程连同整个环一起冻住（用户 2026-10-09 报「卡住两三秒」）。
+    // 这里先挂上 loading 状态并**保持菜单可见**（宠物切「忙碌」、该段显示跳动的点），
+    // 查完由 `WM_APP_LOADED` 收尾。
+    if let Some((ai, ci, label, target)) = action.clone() {
+        if is_url(&target) && unsafe { !windows_of_class("Chrome_WidgetWin_1").is_empty() } {
+            if let Some(cix) = ci {
+                st.loading = Some((ai, cix));
+                st.loading_url = target.clone();
+                set_mood(st, 5); // 忙碌：目光小幅循环 = 加载中
+                println!("[*] 查询是否已打开 · {label}");
+                // ⚠️⚠️ 菜单空闲时帧定时器是**停着的**（省 CPU）。不把它踢起来，
+                // loading 状态只会躺在内存里 —— 环停在旧帧上，用户什么动画都看不到
+                // （第一版就是这样：查完才重绘一次，看起来「点了没反应」）。
+                unsafe {
+                    let mh = MAIN_HWND.load(Ordering::Relaxed);
+                    if mh != 0 {
+                        let _ = SetTimer(HWND(mh as *mut c_void), TIMER_FRAME, 16, None);
+                    }
+                    frame(st, 255);
+                }
+                switch_bg(target);
+                return;
+            }
+        }
+    }
+
     unsafe {
         hide_menu(st);
     }
@@ -4445,7 +4943,8 @@ fn draw_ring_sector(buf: &mut [u8], pal: &Pal, r_in: f32, r_out: f32,
 unsafe fn draw_ring_content(st: &State, buf: &mut [u8], pal: &Pal,
                             seg: (f32, f32, f32), r_in: f32, r_out: f32,
                             icon: Option<&IconTex>, name: &str,
-                            fg: (u8, u8, u8), hot: f32, caret: bool, alpha: f32) {
+                            fg: (u8, u8, u8), hot: f32, caret: bool, alpha: f32,
+                            loading: bool) {
     let (mid_deg, a1, a2) = seg;
     let a8 = (255.0 * alpha).clamp(0.0, 255.0) as u8;
     if a8 == 0 {
@@ -4500,6 +4999,28 @@ unsafe fn draw_ring_content(st: &State, buf: &mut [u8], pal: &Pal,
         let cht = ch.to_uppercase().to_string();
         draw_text_rot(st, buf, ix, iy, &cht, 13, iang.to_radians(),
                       pal.ink.0, pal.ink.1, pal.ink.2, a8);
+    }
+
+    // ── 加载中：把名字换成**三个跳动的点** ──
+    // 「在等」必须看得出来在动，否则用户只会觉得「点了没反应 / 卡住」。
+    if loading {
+        let n = 3usize;
+        let step = 7.0 * K * KC;
+        // 相位在 0..(2n-2) 之间来回（0,1,2,1,0,1,…）= 来回跳，比单向循环更像「在处理」
+        let span = (n * 2 - 2).max(1);
+        let ph = ((now_s() * 3.2) as usize) % span;
+        let hi = if ph < n { ph } else { span - ph };
+        // 把整组点**居中**在文字可用区里（名字变短了，别挤在图标旁边）
+        let group = step * (n as f32 - 1.0);
+        let base = -half + CHIP_PAD_L + CHIP_ICON + CHIP_GAP + (avail - group).max(0.0) * 0.5;
+        for k in 0..n {
+            let (dx, dy, _ang) = place(base + k as f32 * step, 0.0);
+            let on = k == hi;
+            let col = if on { fg } else { mixc(pal.paper, fg, 0.42) };
+            let r = if on { 3.4 * K } else { 2.1 * K };
+            flat_circle(buf, dx, dy, r, col, 0.0, col, 0.0, 0.0, 0.0, 0.0, alpha);
+        }
+        return; // 加载中不画名字、也不画光标
     }
 
     if !label.is_empty() {
@@ -4686,18 +5207,21 @@ fn drag_step(st: &mut State, x: i32, y: i32) {
     }
     st.drag_x = (x - st.win_x) as f32;
     st.drag_y = (y - st.win_y) as f32;
-    // ── 换位目标：光标落在**另一个**图标/胶囊上就记下来（松手时交换）──
+    // ── 插入目标：光标落在**另一个**图标/胶囊上就记下来（松手时插到该槽位）──
     // 每帧重算，所以离开就自动清掉。
     st.drag_over_app = None;
     st.drag_over_chip = None;
     if let Some(ai) = st.drag_app {
-        if let Some(t) = nearest_app(st, st.drag_x, st.drag_y, 0.0) {
+        // ⚠️ 落点用**角度吸附**（`drop_slot_app`），不是「贴住某个图标」（`nearest_app`）：
+        // 用户要把图标拖到**两个图标中间**插进去（2026-10-09），贴图标判定会落空。
+        if let Some(t) = drop_slot_app(st, st.drag_x, st.drag_y) {
             if t != ai {
                 st.drag_over_app = Some(t);
             }
         }
     } else if let Some((ai, j)) = st.drag_chip {
-        if let Some(t) = hit_chip_at(st, ai, st.drag_x, st.drag_y) {
+        // 同理：段间的缝里也算落点，归到最近的一段。
+        if let Some(t) = drop_slot_chip(st, ai, st.drag_x, st.drag_y) {
             if t != j {
                 st.drag_over_chip = Some(t);
             }
@@ -4738,18 +5262,24 @@ fn drag_end(st: &mut State, x: i32, y: i32) {
             set_mood(st, 2);
             println!("[remove] {} 秒后移除：{}（点「取消」放回）", REMOVE_GRACE as u32, name);
         } else if let Some(t) = st.drag_over_app.filter(|&t| t != ai && t < st.apps.len()) {
-            // ── 盘内落在**另一个应用图标**上 = 换位 ──
-            // 内环只和内环换；跨层（应用 ↔ 外环条目）没有意义。
-            st.apps.swap(ai, t);
-            // 选中态跟着被换的那个走，否则会指到错的 app
-            if st.active_app == Some(ai) {
-                st.active_app = Some(t);
-            } else if st.active_app == Some(t) {
-                st.active_app = Some(ai);
+            // ── 盘内落在**另一个应用图标**上 = 插入排序（不是两两交换）──
+            // 拖起的那一个从原槽位抽出，插入到目标槽位；两者之间的整体顺移一格。
+            // `remove(ai)` + `insert(t, ..)` 恰好等于「拖起项占用目标槽位、其余顺移」：
+            //   [A,B,C] 拖 A 到 C 槽位 → [B,C,A]（A 落在 index 2，C 左移一格）。
+            // （旧实现是 swap → [C,B,A]，中间的不动，用户 2026-10-09 明确要求改成插入。）
+            let entry = st.apps.remove(ai);
+            let name = entry.name.clone();
+            st.apps.insert(t, entry);
+            // 选中态跟着**被拖动的那一个**走（应用身份不变，只是换了槽位）：
+            //   拖动项原在 ai、现落 t；中间那批整体向 ai 方向平移一格。
+            match st.active_app {
+                Some(a) if a == ai => st.active_app = Some(t),
+                Some(a) if ai < a && a <= t => st.active_app = Some(a - 1),
+                Some(a) if t <= a && a < ai => st.active_app = Some(a + 1),
+                _ => {}
             }
-            let (na, nb) = (st.apps[ai].name.clone(), st.apps[t].name.clone());
             unsafe { save_settings(st) };
-            println!("[reorder] 应用换位：{} ↔ {}", na, nb);
+            println!("[reorder] 应用插入：{} → 槽位 {}", name, t);
             set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         } else {
             // 盘内松手 = 放弃；但若已有待确认移除，表情得回到「生气」而不是常态
@@ -4775,19 +5305,19 @@ fn drag_end(st: &mut State, x: i32, y: i32) {
         } else if let Some(t) = st.drag_over_chip
             .filter(|&t| t != j && t < st.apps.get(ai).map(|a| a.items.len()).unwrap_or(0))
         {
-            // ── 外环内换位（只换同一个应用的条目顺序）──
-            let (na, nb) = {
-                let items = &st.apps[ai].items;
-                (items[j].name.clone(), items[t].name.clone())
-            };
-            st.apps[ai].items.swap(j, t);
+            // ── 外环内**插入排序**（只重排同一个应用的条目，不是两两交换）──
+            let entry = st.apps[ai].items.remove(j);
+            let name = entry.name.clone();
+            st.apps[ai].items.insert(t, entry);
+            // 悬停跟随被拖动的那个条目（身份不变，只换槽位）
             match st.hover_chip {
                 Some(h) if h == j => st.hover_chip = Some(t),
-                Some(h) if h == t => st.hover_chip = Some(j),
+                Some(h) if j < h && h <= t => st.hover_chip = Some(h - 1),
+                Some(h) if t <= h && h < j => st.hover_chip = Some(h + 1),
                 _ => {}
             }
             unsafe { save_settings(st) };
-            println!("[reorder] 条目换位：{} ↔ {}", na, nb);
+            println!("[reorder] 条目插入：{} → 槽位 {}", name, t);
             set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         } else {
             set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
@@ -6015,6 +6545,10 @@ unsafe fn on_timer(st: &mut State) {
     if st.editing.is_some() {
         moving = true;
     }
+    // ── 后台查「网址是否已开」期间：宠物「忙碌」表情 + 该段跳动的点都要动 ──
+    if st.loading.is_some() {
+        moving = true;
+    }
 
     // 悬停压暗渐变。焦点必须来自**真实命中**（见 focus_app）：
     // 用粘性的 active_app 会让「移到中心头像后」其它应用依旧蒙着灰。
@@ -6268,6 +6802,8 @@ unsafe fn close_menu_now(st: &mut State) {
     st.drag_over_app = None;
     st.drag_over_chip = None;
     st.drag_fade = 0.0;
+    // 后台「网址是否已开」查询的 loading 一并作废（Esc 取消后不该再冒出来动作）
+    st.loading = None;
     st.mood_hold = 0.0;
     // 改名态必须一起清：否则 EDIT_ARMED 残留，键盘钩子会一直吞字符
     st.editing = None;
@@ -6641,6 +7177,30 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             }
             LRESULT(0)
         }
+        // 后台「这个网址是不是已经开着」查完了（`switch_bg` 线程发的）。
+        WM_APP_LOADED => {
+            let st = state_of(hwnd);
+            // `loading` 为空 = 用户中途按了 Esc / 菜单已收起 → 整件事作废
+            if let Some(_) = st.loading.take() {
+                let url = std::mem::take(&mut st.loading_url);
+                let hit = LOAD_HIT.load(Ordering::SeqCst);
+                set_mood(st, 0);
+                unsafe {
+                    hide_menu(st);
+                }
+                if hit {
+                    println!("[*] 已切到打开着的网页 · {url}");
+                } else {
+                    // 没开着 → 照常打开
+                    launch(&url);
+                    println!("[*] 启动 · {url}");
+                }
+                unsafe {
+                    frame(st, 255);
+                }
+            }
+            LRESULT(0)
+        }
         // 仅自动化测试：拖放/拖出这套状态机没法用合成鼠标事件驱动
         // （低级钩子只认真实事件），所以留一条诊断消息直接走同一条代码路径。
         // w = (y<<16)|x 屏幕坐标；l = 0 拖动中 / 1 松手 / 2 只挪光标。
@@ -6739,10 +7299,12 @@ WM_APP_DISMISS_FG => {
         WM_APP_DUMP => {
             let st = state_of(hwnd);
             println!(
-                "[dump] open={} active={:?} chip={:?} win=({},{})",
+                "[dump] open={} active={:?} chip={:?} loading={:?} mood={} win=({},{})",
                 MENU_OPEN.load(Ordering::Relaxed),
                 st.active_app,
                 st.hover_chip,
+                st.loading,
+                st.mood,
                 st.win_x,
                 st.win_y
             );
@@ -6781,12 +7343,14 @@ WM_APP_DISMISS_FG => {
                 let st = state_of(hwnd);
                 if let Some((ai, j)) = st.pending_click.take() {
                     let _ = KillTimer(hwnd, TIMER_CLICK);
-                    // 期间菜单可能被收了 / hover 变了 → 这时候执行会启动错的东西
-                    if MENU_OPEN.load(Ordering::Relaxed)
-                        && st.active_app == Some(ai)
-                        && st.hover_chip == Some(j)
-                        && st.editing.is_none()
-                    {
+                    // 单击的落点在**按下那一刻**就定了（存在 pending_click 里），这里只该
+                    // 复核「菜单还在不在 / 有没有被第二击改成改名」。
+                    //
+                    // ⚠️⚠️ **不要**再用 hover 复核落点：网址要联网查 1~2 秒，用户点完自然会把
+                    // 鼠标移开，hover_chip 变 None → 单击被悄悄丢弃，表现就是
+                    // 「点完鼠标移出梯形，既不 loading 也不跳转」（用户 2026-10-09 报）。
+                    if MENU_OPEN.load(Ordering::Relaxed) && st.editing.is_none() {
+                        st.active_app = Some(ai);
                         st.hover_chip = Some(j);
                         commit(st);
                     }
@@ -8227,6 +8791,61 @@ fn main() {
             );
             dump_all(&dir)
         };
+        return;
+    }
+    // 诊断：解析目标 → 找「同程序的已开窗口」（只打印，不真的启动）
+    if args.len() >= 2 && args[1] == "--findwin" {
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+            );
+            let t = args.get(2).cloned().unwrap_or_default();
+            println!("target = {t}");
+            match resolve_target_exe(&t) {
+                Some(exe) => {
+                    println!("exe    = {exe}");
+                    match find_window_of_exe(&exe) {
+                        Some(hw) => {
+                            let mut b = [0u16; 256];
+                            let n = GetWindowTextW(hw, &mut b).max(0) as usize;
+                            println!("found  = HWND({:?}) title={:?}", hw.0,
+                                String::from_utf16_lossy(&b[..n.min(b.len())]));
+                        }
+                        None => println!("found  = <无>"),
+                    }
+                }
+                None => println!("exe    = <目标不是可执行文件>"),
+            }
+        }
+        return;
+    }
+    // 诊断：只抓网页标题（测 WinINet 那条路）
+    if args.len() >= 2 && args[1] == "--fetchtitle" {
+        unsafe {
+            let u = args.get(2).cloned().unwrap_or_default();
+            match fetch_page_title(&u) {
+                Some(t) => println!("title = {t}"),
+                None => println!("title = <没抓到>"),
+            }
+        }
+        return;
+    }
+    // 诊断：完整的「网址已打开就切过去」（抓标题 → UIA 找标签 → 选中 + 置前）
+    if args.len() >= 2 && args[1] == "--focusurl" {
+        unsafe {
+            // ⚠️ UIA（CUIAutomation）是 COM 对象，这个分支必须自己 CoInitializeEx，
+            //    否则 CoCreateInstance 静默失败、整个函数 20ms 就返回（第一版就踩了）。
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+            );
+            let u = args.get(2).cloned().unwrap_or_default();
+            println!("browser windows = {}", windows_of_class("Chrome_WidgetWin_1").len());
+            let t0 = Instant::now();
+            let hit = switch_to_open_tab(&u);
+            println!("switch = {hit}   (耗时 {:?})", t0.elapsed());
+        }
         return;
     }
     // 诊断：列出每个应用目标的图标提取结果（原生尺寸 / 是否有图标）

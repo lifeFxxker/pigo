@@ -30,6 +30,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_Controls_Dialogs",
     "Win32_System_SystemInformation",
     "Win32_System_Console",
+    "Win32_UI_Accessibility",
+    "Win32_Networking_WinInet",
 ] }
 
 [profile.release]

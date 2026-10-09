@@ -3,7 +3,8 @@
 
 ① 拖拽删除不再互相阻塞：连着拖走两个都能进队列（旧版第二个会被静默忽略），
    「取消」只放回**最后加入**的那个。
-② 拖拽换位：拖 A 到 B 的位置松手 → 两者交换（内环/外环各测一次）。
+② 拖拽**插入排序**：拖 A 到 C 的槽位松手 → A 占用 C 的槽位、中间的顺移一格
+   （不是两两交换；内环/外环各测一次，用例特意跨位以免和 swap 混淆）。
 ③ 编辑态光标闪烁：靠 `moving` 持续重绘 —— 这里验「程序在编辑态确实在重绘」
    （用 CPU 时间/帧计数间接确认，外观另用 dump 出图）。
 
@@ -144,6 +145,13 @@ def main():
         a = math.radians(i * 360.0 / n)
         return int(wx + G.CC + ri * math.sin(a)), int(wy + G.CC - ri * math.cos(a))
 
+    def at_ang(deg, n=None):
+        """任意角度上的环上点（用来把光标放到**两个图标中间的空隙**里）。"""
+        n = n or len(apps())
+        ri, _ = G.ring_layout(n)
+        a = math.radians(deg)
+        return int(wx + G.CC + ri * math.sin(a)), int(wy + G.CC - ri * math.cos(a))
+
     ox, oy = int(wx + G.CC + disc + 110), int(wy + G.CC)   # 盘外
     bx, by = int(wx + G.CC), int(wy + G.CC + G.RM_BTN_DY)  # 取消按钮
 
@@ -195,27 +203,49 @@ def main():
     check('①f 两个都到期 → 一次移除 2 个（证明第二个没被忽略）',
           len(after2) == m - 2, '%d -> %d' % (m, len(after2)))
 
-    # ══════ ② 拖拽换位 ══════
+    # ══════ ② 拖拽插入排序（不是交换）══════
+    # 用例特意**跨位**（0 → 2）：swap 出 [c2,c1,c0]，insert 出 [c1,c2,c0]，一眼分辨。
     cur = apps()
     if len(cur) >= 3:
         if not menu_visible():
             open_menu()
-        a_src, a_dst = cur[0], cur[2]
         x0, y0 = at(0, len(cur))
         x2, y2 = at(2, len(cur))
         sim(x0, y0, 0)                  # 抓住第 0 个
-        sim(x2, y2, 0)                  # 拖到第 2 个的位置
-        sim(x2, y2, 1)                  # 松手 = 换位
+        sim(x2, y2, 0)                  # 拖到第 2 个的槽位
+        sim(x2, y2, 1)                  # 松手 = 插入
         time.sleep(0.5)
         new = apps()
-        ok = len(new) == len(cur) and new[0] == a_dst and new[2] == a_src
-        check('②a 内环换位：拖第 1 个到第 3 个的位置 → 两者交换', ok,
-              '%s… → %s…' % (cur[:3], new[:3]))
+        want = cur[1:]
+        want.insert(2, cur[0])          # remove(0) + insert(2)
+        check('②a 内环插入：拖第 1 个到第 3 个槽位 → 该槽位让位、中间的顺移',
+              new == want,
+              '%s… → %s…（期望 %s…）' % (cur[:3], new[:3], want[:3]))
+        # 插入必须落盘（重启后保持）
+        check('②b 插入已落盘（ini 顺序确实变了）', new != cur)
 
-        # 换位必须落盘（重启后保持）
-        check('②b 换位已落盘（ini 顺序确实变了）', new != cur)
+    # ══════ ②' 拖到**两个图标中间的空隙**也要能插入 ══════
+    # 用户 2026-10-09 报「拖到两个图标中间没反应、插不进去」：旧落点判定要求光标贴住图标，
+    # 缝隙处到两侧图标都太远 → 落空 → 当作放弃。改用**角度吸附**后应吸附到最近槽位。
+    cur = apps()
+    if len(cur) >= 6:
+        if not menu_visible():
+            open_menu()
+        n = len(cur)
+        per = 360.0 / n
+        gx, gy = at_ang(3.6 * per, n)   # 槽位 3 与 4 之间的空隙
+        x0, y0 = at(0, n)
+        sim(x0, y0, 0)
+        sim(gx, gy, 0)
+        sim(gx, gy, 1)
+        time.sleep(0.5)
+        new = apps()
+        want = cur[1:]
+        want.insert(4, cur[0])          # round(3.6) = 4
+        check('②d 拖到两图标中间的空隙 → 吸附到最近槽位并插入', new == want,
+              '%s… → %s…（期望 %s…）' % (cur[:5], new[:5], want[:5]))
 
-    # 外环换位：先选中一个应用，再拖它的条目
+    # 外环插入：先选中一个应用，再拖它的条目
     if len(apps()) >= 1:
         SM(host, WM_APP_CANCEL, 0, 0)
         time.sleep(0.3)
@@ -223,13 +253,14 @@ def main():
         # ⚠️ 这里**不能**再发 WM_APP_CLICK —— 那是「真单击」，会走 commit/关菜单，
         # 菜单一关 `WM_APP_DRAGSIM` 就整段不生效（第一版外环换位失败就是这个）。
         # 选中应用只用 EDITSIM phase 9（它不碰菜单开合）。
+        # ⚠️ 要 ≥3 个条目才能把「插入」和「交换」区分开。
         host_app = None
         for a in apps():
-            if len(items(a)) >= 2:
+            if len(items(a)) >= 3:
                 host_app = a
                 break
         if host_app is None:
-            print('SKIP  外环换位（没有哪个应用有 ≥2 个条目）', flush=True)
+            print('SKIP  外环排序（没有哪个应用有 ≥3 个条目）', flush=True)
         else:
             # 让 active_app 指向 host_app：EDITSIM phase 9 只设状态、不进编辑态
             # （l >= 1000 时高位指定应用下标，低位 j 固定取 0）
@@ -245,19 +276,21 @@ def main():
                 x, y = v & 0xFFFF, (v >> 16) & 0xFFFF
                 return (x, y) if x and y else None
 
-            p0, p1 = chippos(0), chippos(1)
-            check('②c0 程序回报了两个段的坐标', p0 is not None and p1 is not None,
-                  'p0=%s p1=%s' % (p0, p1))
+            p0, p2 = chippos(0), chippos(2)
+            check('②c0 程序回报了两个段的坐标', p0 is not None and p2 is not None,
+                  'p0=%s p2=%s' % (p0, p2))
             check('②c1 拖拽前菜单仍开着', menu_visible())
-            if p0 and p1:
+            if p0 and p2:
                 sim(p0[0], p0[1], 0)
-                sim(p1[0], p1[1], 0)
-                sim(p1[0], p1[1], 1)
+                sim(p2[0], p2[1], 0)
+                sim(p2[0], p2[1], 1)
                 time.sleep(0.5)
                 it2 = items(host_app)
-                check('②c 外环换位：第 1 个条目与第 2 个交换',
-                      len(it2) == len(it) and it2[0] == it[1] and it2[1] == it[0],
-                      '%s… → %s…' % (it[:2], it2[:2]))
+                want2 = it[1:]
+                want2.insert(2, it[0])   # remove(0) + insert(2)
+                check('②c 外环插入：拖第 1 个条目到第 3 个槽位',
+                      it2 == want2,
+                      '%s… → %s…（期望 %s…）' % (it[:3], it2[:3], want2[:3]))
 
     proc.terminate()
     time.sleep(0.5)
