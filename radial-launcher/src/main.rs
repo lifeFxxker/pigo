@@ -480,9 +480,24 @@ struct AppEntry {
 /// 所以这里必须把完整条目和原槽位都揣着，放回时一个字节都不丢。
 enum PendingRm {
     /// 应用图标：pos = 原槽位
-    App { pos: usize, entry: AppEntry },
+    App { pos: usize, entry: AppEntry, deadline: f64 },
     /// 外环胶囊：app = 所属应用槽位，pos = item 原序号
-    Chip { app: usize, pos: usize, entry: ItemEntry },
+    Chip { app: usize, pos: usize, entry: ItemEntry, deadline: f64 },
+}
+
+impl PendingRm {
+    fn deadline(&self) -> f64 {
+        match self {
+            PendingRm::App { deadline, .. } | PendingRm::Chip { deadline, .. } => *deadline,
+        }
+    }
+}
+
+/// 最早到期的时刻 —— 取消按钮的倒计时条用它。
+/// 用**最早**的那个（而不是最后加入的那个）才对得上用户看到的事：
+/// 进度条走完时，确实有一个真的消失了。
+fn rm_soonest(st: &State) -> Option<f64> {
+    st.pending_rms.iter().map(|p| p.deadline()).reduce(f64::min)
 }
 
 struct State {
@@ -540,6 +555,10 @@ struct State {
     mood_hold: f64,
     /// 正被拖出的应用（None = 没在拖）
     drag_app: Option<usize>,
+    /// 拖拽中光标下方的**另一个**槽位（松手时与它交换位置）。
+    /// 内环/外环分开：跨层换位（应用 ↔ 外环条目）没有意义。
+    drag_over_app: Option<usize>,
+    drag_over_chip: Option<usize>,
     /// 正被拖出的外环胶囊 (应用槽位, item 序号)
     drag_chip: Option<(usize, usize)>,
     /// 被拖图标跟随的画布坐标
@@ -549,8 +568,10 @@ struct State {
     drag_fade: f32,
     /// 等待确认移除的内容 —— **已经从盘面摘下**，所以立即不可见；
     /// 超时落盘、点取消或收起菜单都原位放回
-    pending_rm: Option<PendingRm>,
-    rm_end: f64,
+    /// 待确认移除的队列。**可以同时有多个** —— 拖走一个之后要能立刻拖下一个，
+    /// 不必等它 5 秒倒计时走完（用户 2026-10-09 明确要求）。
+    /// 「取消」只作用于**最后加入**的那个；各自按自己的 `deadline` 落盘。
+    pending_rms: Vec<PendingRm>,
     /// 取消按钮的出现进度 0→1
     cancel_a: f32,
     /// 最近一次输入（光标移动/点击）的时刻（now_s 口径，发呆判定用）
@@ -683,12 +704,13 @@ impl State {
             mood_prev: 0,
             mood_hold: 0.0,
             drag_app: None,
+            drag_over_app: None,
+            drag_over_chip: None,
             drag_chip: None,
             drag_x: 0.0,
             drag_y: 0.0,
             drag_fade: 0.0,
-            pending_rm: None,
-            rm_end: 0.0,
+            pending_rms: Vec::new(),
             cancel_a: 0.0,
             last_input: 0.0,
             cur_x: 0,
@@ -1609,7 +1631,12 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
         if ap <= 0.01 {
             continue;
         }
-        let hot_k = st.app_hot[i];
+        // 拖拽经过时也当 hover 画 —— 那就是「要落在这里」的反馈
+        let hot_k = if st.drag_over_app == Some(i) {
+            1.0
+        } else {
+            st.app_hot[i]
+        };
         let dim = st.app_anim[i];
         // 正在被拖出的那个：跟着光标走，并且随拖出距离淡出
         let dragging = st.drag_app == Some(i);
@@ -1688,10 +1715,9 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
         let a = st.cancel_a;
         let hw = RM_BTN_W * 0.5 * a;
         let hh = RM_BTN_H * 0.5 * a;
-        let frac = if st.pending_rm.is_some() {
-            ((st.rm_end - now) / REMOVE_GRACE).clamp(0.0, 1.0) as f32
-        } else {
-            0.0
+        let frac = match rm_soonest(st) {
+            Some(next) => ((next - now) / REMOVE_GRACE).clamp(0.0, 1.0) as f32,
+            None => 0.0,
         };
         flat_round_rect(buf, bx, by + 2.5 * a, hw, hh, RM_BTN_R * a,
             mixc(pal.paper, pal.ink, 0.16), 0.0, pal.ink, 0.0, 0.0, 0.0, 0.0, a);
@@ -1727,7 +1753,11 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
                 if anim <= 0.01 {
                     continue;
                 }
-                let hot_k = st.chip_hot[j];
+                let hot_k = if st.drag_over_chip == Some(j) {
+                    1.0
+                } else {
+                    st.chip_hot[j]
+                };
                 // 段的角度范围由布局给出（贴身扇面：角跨 ∝ 名字宽度，段间留缝）
                 let (a1, a2) = segs[j];
                 let seg = ((a1 + a2) * 0.5, a1, a2);
@@ -4482,9 +4512,13 @@ unsafe fn draw_ring_content(st: &State, buf: &mut [u8], pal: &Pal,
                       fg.0, fg.1, fg.2, a8);
     }
 
-    // 编辑光标：0.5s 周期方波闪烁，画在文本末尾
+    // 编辑光标：0.5s 周期方波闪烁，画在文本末尾。
+    // ⚠️⚠️ 相位必须按**当前时间**算。原来用的是 `st.edit_caret` —— 那是「进入编辑的时刻」，
+    // 是个常量，`(常量 * 2).fract()` 只会得到一个固定值 → 光标要么常亮要么常灭，
+    // **永远不会变**。所以即使帧一直在重绘，看起来也完全不闪
+    // （用户 2026-10-09 报「不知道这是编辑模式了」）。
     if caret {
-        let blink = (st.edit_caret * 2.0).fract() < 0.5;
+        let blink = (now_s() * 2.0).fract() < 0.5;
         if blink {
             let textw = est_text_w(&label, cjk, lat);
             let cw = est_text_w("0", cjk, lat).max(4.0);
@@ -4492,7 +4526,10 @@ unsafe fn draw_ring_content(st: &State, buf: &mut [u8], pal: &Pal,
                 -half + CHIP_PAD_L + CHIP_ICON + CHIP_GAP + textw + 1.5 + cw * 0.5,
                 0.0,
             );
-            rot_rrect(buf, bx, by, cw * 0.5, 7.0 * K, 1.0, tang.to_radians(), fg, alpha);
+            // 高度按**文字实际高度**取（原来是 7K ≈ 9.2px，比文字 11.5px 矮一截，
+            // 看着像个小点）
+            let chh = (RING_NAME_PX as f32 * K * KC) * 0.5;
+            rot_rrect(buf, bx, by, cw * 0.5, chh, 1.0, tang.to_radians(), fg, alpha);
         }
     }
 }
@@ -4572,33 +4609,52 @@ fn set_mood(st: &mut State, m: u8) {
 
 /// 倒计时到点：待移除的内容**早已从盘面摘下**，这里只负责落盘。
 /// 与设置页的删除同一套持久化：应用删除备份→写→重载图标；胶囊删除只写。
-unsafe fn commit_remove(st: &mut State) {
-    let Some(p) = st.pending_rm.take() else { return };
-    st.rm_end = 0.0;
-    match p {
-        PendingRm::App { entry, .. } => {
-            println!("[remove] 已移除应用：{}", entry.name);
-            save_settings(st);
-            load_icons(st);
+unsafe fn commit_expired(st: &mut State, now: f64) {
+    if st.pending_rms.is_empty() {
+        return;
+    }
+    let mut removed_any = false;
+    let mut removed_app = false;
+    let mut i = 0;
+    while i < st.pending_rms.len() {
+        if st.pending_rms[i].deadline() > now {
+            i += 1;
+            continue;
         }
-        PendingRm::Chip { app, entry, .. } => {
-            let owner = st.apps.get(app).map(|a| a.name.as_str()).unwrap_or("?");
-            println!("[remove] 已移除胶囊：{}（{}）", entry.name, owner);
-            save_settings(st);
+        let p = st.pending_rms.remove(i);
+        removed_any = true;
+        match p {
+            PendingRm::App { entry, .. } => {
+                println!("[remove] 已移除应用：{}", entry.name);
+                removed_app = true;
+            }
+            PendingRm::Chip { app, entry, .. } => {
+                let owner = st.apps.get(app).map(|a| a.name.as_str()).unwrap_or("?");
+                println!("[remove] 已移除胶囊：{}（{}）", entry.name, owner);
+            }
+        }
+    }
+    // 落盘只做一次（`load_icons` 是重活，删多个应用时别重载多次）
+    if removed_any {
+        save_settings(st);
+        if removed_app {
+            load_icons(st);
         }
     }
 }
 
 /// 取消一次待移除：把摘下的内容原位放回（倒计时到点走 commit_remove，不走这里）
+/// 取消一次待移除：只作用于**最后加入**的那个（用户 2026-10-09 明确要求），
+/// 把它原位放回。其余待删的继续按各自的倒计时走。
 fn cancel_remove(st: &mut State) {
-    if let Some(p) = st.pending_rm.take() {
+    if let Some(p) = st.pending_rms.pop() {
         match p {
-            PendingRm::App { pos, entry } => {
+            PendingRm::App { pos, entry, .. } => {
                 let pos = pos.min(st.apps.len());
                 st.apps.insert(pos, entry);
                 println!("[remove] 已取消，放回：{}", st.apps[pos].name);
             }
-            PendingRm::Chip { app, pos, entry } => {
+            PendingRm::Chip { app, pos, entry, .. } => {
                 if let Some(a) = st.apps.get_mut(app) {
                     let pos = pos.min(a.items.len());
                     a.items.insert(pos, entry);
@@ -4607,8 +4663,8 @@ fn cancel_remove(st: &mut State) {
             }
         }
     }
-    st.rm_end = 0.0;
-    set_mood(st, 0);
+    // 还有别的待删 → 保持「生气」（等着继续确认）
+    set_mood(st, if st.pending_rms.is_empty() { 0 } else { 2 });
 }
 
 /// 拖动中：抓的是「按下那一刻」命中的目标（应用图标优先，其次外环胶囊），
@@ -4630,6 +4686,23 @@ fn drag_step(st: &mut State, x: i32, y: i32) {
     }
     st.drag_x = (x - st.win_x) as f32;
     st.drag_y = (y - st.win_y) as f32;
+    // ── 换位目标：光标落在**另一个**图标/胶囊上就记下来（松手时交换）──
+    // 每帧重算，所以离开就自动清掉。
+    st.drag_over_app = None;
+    st.drag_over_chip = None;
+    if let Some(ai) = st.drag_app {
+        if let Some(t) = nearest_app(st, st.drag_x, st.drag_y, 0.0) {
+            if t != ai {
+                st.drag_over_app = Some(t);
+            }
+        }
+    } else if let Some((ai, j)) = st.drag_chip {
+        if let Some(t) = hit_chip_at(st, ai, st.drag_x, st.drag_y) {
+            if t != j {
+                st.drag_over_chip = Some(t);
+            }
+        }
+    }
     let grabbed = st.drag_app.is_some() || st.drag_chip.is_some();
     set_mood(st, if in_disc(st, x, y) {
         if grabbed { 4 } else { 0 }
@@ -4646,7 +4719,9 @@ fn drag_step(st: &mut State, x: i32, y: i32) {
 fn drag_end(st: &mut State, x: i32, y: i32) {
     note_input(st, x, y);
     if let Some(ai) = st.drag_app {
-        if ai < st.apps.len() && !in_disc(st, x, y) && st.pending_rm.is_none() {
+        // ⚠️ 这里**不再检查**有没有待确认的移除 —— 待删是可以排队的，
+        // 拖走一个之后要能立刻拖下一个（用户 2026-10-09 要求）。
+        if ai < st.apps.len() && !in_disc(st, x, y) {
             let entry = st.apps.remove(ai);
             // 槽位收缩：被摘槽位之后的索引整体左移，别让选中态指错应用
             match st.active_app {
@@ -4655,16 +4730,33 @@ fn drag_end(st: &mut State, x: i32, y: i32) {
                 _ => {}
             }
             let name = entry.name.clone();
-            st.pending_rm = Some(PendingRm::App { pos: ai, entry });
-            st.rm_end = now_s() + REMOVE_GRACE;
+            st.pending_rms.push(PendingRm::App {
+                pos: ai,
+                entry,
+                deadline: now_s() + REMOVE_GRACE,
+            });
             set_mood(st, 2);
             println!("[remove] {} 秒后移除：{}（点「取消」放回）", REMOVE_GRACE as u32, name);
+        } else if let Some(t) = st.drag_over_app.filter(|&t| t != ai && t < st.apps.len()) {
+            // ── 盘内落在**另一个应用图标**上 = 换位 ──
+            // 内环只和内环换；跨层（应用 ↔ 外环条目）没有意义。
+            st.apps.swap(ai, t);
+            // 选中态跟着被换的那个走，否则会指到错的 app
+            if st.active_app == Some(ai) {
+                st.active_app = Some(t);
+            } else if st.active_app == Some(t) {
+                st.active_app = Some(ai);
+            }
+            let (na, nb) = (st.apps[ai].name.clone(), st.apps[t].name.clone());
+            unsafe { save_settings(st) };
+            println!("[reorder] 应用换位：{} ↔ {}", na, nb);
+            set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         } else {
             // 盘内松手 = 放弃；但若已有待确认移除，表情得回到「生气」而不是常态
-            set_mood(st, if st.pending_rm.is_some() { 2 } else { 0 });
+            set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         }
     } else if let Some((ai, j)) = st.drag_chip {
-        if ai < st.apps.len() && !in_window(st, x, y) && st.pending_rm.is_none() {
+        if ai < st.apps.len() && !in_window(st, x, y) {
             let entry = st.apps[ai].items.remove(j);
             match st.hover_chip {
                 Some(h) if h > j => st.hover_chip = Some(h - 1),
@@ -4672,20 +4764,43 @@ fn drag_end(st: &mut State, x: i32, y: i32) {
                 _ => {}
             }
             let name = entry.name.clone();
-            st.pending_rm = Some(PendingRm::Chip { app: ai, pos: j, entry });
-            st.rm_end = now_s() + REMOVE_GRACE;
+            st.pending_rms.push(PendingRm::Chip {
+                app: ai,
+                pos: j,
+                entry,
+                deadline: now_s() + REMOVE_GRACE,
+            });
             set_mood(st, 2);
             println!("[remove] {} 秒后移除胶囊：{}（点「取消」放回）", REMOVE_GRACE as u32, name);
+        } else if let Some(t) = st.drag_over_chip
+            .filter(|&t| t != j && t < st.apps.get(ai).map(|a| a.items.len()).unwrap_or(0))
+        {
+            // ── 外环内换位（只换同一个应用的条目顺序）──
+            let (na, nb) = {
+                let items = &st.apps[ai].items;
+                (items[j].name.clone(), items[t].name.clone())
+            };
+            st.apps[ai].items.swap(j, t);
+            match st.hover_chip {
+                Some(h) if h == j => st.hover_chip = Some(t),
+                Some(h) if h == t => st.hover_chip = Some(j),
+                _ => {}
+            }
+            unsafe { save_settings(st) };
+            println!("[reorder] 条目换位：{} ↔ {}", na, nb);
+            set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         } else {
-            set_mood(st, if st.pending_rm.is_some() { 2 } else { 0 });
+            set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
         }
     }
     // 空手拖动松手（按在空白处划了一圈）：回常态；有待确认移除则回「生气」
     if st.drag_app.is_none() && st.drag_chip.is_none() {
-        set_mood(st, if st.pending_rm.is_some() { 2 } else { 0 });
+        set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
     }
     st.drag_app = None;
     st.drag_chip = None;
+    st.drag_over_app = None;
+    st.drag_over_chip = None;
 }
 
 /// 三个不同频率正弦叠加成一个伪随机抖动。amp 的单位是**球半径的倍数**。
@@ -5800,7 +5915,7 @@ unsafe fn on_timer(st: &mut State) {
     // 把 UI 私有状态推给看门狗（跨线程不能直接读 st，只能靠镜像）
     SNAP_HIDING.store(st.hiding, Ordering::Relaxed);
     SNAP_ENTERING.store(st.entering, Ordering::Relaxed);
-    SNAP_PENDING_RM.store(st.pending_rm.is_some(), Ordering::Relaxed);
+    SNAP_PENDING_RM.store(!st.pending_rms.is_empty(), Ordering::Relaxed);
     SNAP_FOCUS.store(focus_app(st).unwrap_or(usize::MAX), Ordering::Relaxed);
     SNAP_HOVER_CHIP.store(st.hover_chip.unwrap_or(usize::MAX), Ordering::Relaxed);
     SNAP_HIT_APP.store(st.hit_app.unwrap_or(usize::MAX), Ordering::Relaxed);
@@ -5814,7 +5929,7 @@ unsafe fn on_timer(st: &mut State) {
     // 常驻模式（persistent）**不自动收** —— 那是用户明确要的常驻行为。
     if !st.hiding && !st.persistent && now - st.last_input >= IDLE_CLOSE_AFTER {
         // 倒计时移除 / OLE 拖放进行中都不动：那两种状态下自动收起会丢东西
-        if st.pending_rm.is_none() && !DRAG_ACTIVE.load(Ordering::Relaxed) {
+        if st.pending_rms.is_empty() && !DRAG_ACTIVE.load(Ordering::Relaxed) {
             hide_menu(st);
         }
     }
@@ -5852,19 +5967,24 @@ unsafe fn on_timer(st: &mut State) {
             st.drag_fade = want_fade;
         }
         // 取消按钮出现
-        let want_btn = if st.pending_rm.is_some() { 1.0 } else { 0.0 };
+        let want_btn = if st.pending_rms.is_empty() { 0.0 } else { 1.0 };
         if (st.cancel_a - want_btn).abs() > 0.004 {
             st.cancel_a += (want_btn - st.cancel_a) * 0.30;
             moving = true;
         } else {
             st.cancel_a = want_btn;
         }
-        // 倒计时到点 → 真的移除（内容早已摘下，这里只落盘）
-        if st.pending_rm.is_some() {
-            if now >= st.rm_end {
-                st.cancel_a = 0.0;
-                set_mood(st, 0);
-                commit_remove(st);
+        // 倒计时到点 → 落盘。队列里可能一次到点多个（各自有 deadline）。
+        if !st.pending_rms.is_empty() {
+            let next = rm_soonest(st).unwrap_or(f64::INFINITY);
+            if now >= next {
+                commit_expired(st, now);
+                if st.pending_rms.is_empty() {
+                    st.cancel_a = 0.0;
+                    set_mood(st, 0);
+                } else {
+                    moving = true;
+                }
             } else {
                 moving = true; // 倒计时期间必须持续重绘（边框在走）
             }
@@ -5873,7 +5993,7 @@ unsafe fn on_timer(st: &mut State) {
         if st.mood_hold > 0.0 && now >= st.mood_hold {
             st.mood_hold = 0.0;
             if st.mood == 5 {
-                set_mood(st, if st.pending_rm.is_some() { 2 } else { 0 });
+                set_mood(st, if !st.pending_rms.is_empty() { 2 } else { 0 });
             }
         }
         // 发呆：菜单开着、无拖动、无待确认、无拖放，且一段时间没有任何输入
@@ -5881,13 +6001,21 @@ unsafe fn on_timer(st: &mut State) {
             && st.mood_hold == 0.0
             && st.drag_app.is_none()
             && st.drag_chip.is_none()
-            && st.pending_rm.is_none()
+            && st.pending_rms.is_empty()
             && !st.drop_mode
             && now - st.last_input >= IDLE_MOOD_AFTER
         {
             set_mood(st, 3);
         }
     }
+    // ── 改名编辑：光标要闪 → **必须持续重绘** ──
+    // ⚠️⚠️ 这是「进了编辑态却看不到光标闪」的根因：`editing` 从来没参与过 `moving`
+    // 的判断，于是编辑态只画一帧就静止，光标相位固定在 `edit_caret` 那一刻 ——
+    // 落在「灭」的半周期上就**完全看不见**（用户 2026-10-09 报「不知道这是编辑模式」）。
+    if st.editing.is_some() {
+        moving = true;
+    }
+
     // 悬停压暗渐变。焦点必须来自**真实命中**（见 focus_app）：
     // 用粘性的 active_app 会让「移到中心头像后」其它应用依旧蒙着灰。
     let focus = focus_app(st);
@@ -6137,6 +6265,8 @@ unsafe fn close_menu_now(st: &mut State) {
     cancel_remove(st);
     st.drag_app = None;
     st.drag_chip = None;
+    st.drag_over_app = None;
+    st.drag_over_chip = None;
     st.drag_fade = 0.0;
     st.mood_hold = 0.0;
     // 改名态必须一起清：否则 EDIT_ARMED 残留，键盘钩子会一直吞字符
@@ -6587,14 +6717,18 @@ WM_APP_DISMISS_FG => {
             LRESULT(0)
         }
         WM_APP_CHIPPOS => {
-            // 仅测试：回报 0 号胶囊中心的**屏幕**坐标。
-// 单击路径靠真实光标触发 `update_hover()`，自动化必须知道胶囊在哪。
+            // 仅测试：回报**第 `w` 号**胶囊中心的屏幕坐标。
+            // 单击/拖拽路径都靠真实光标命中，自动化必须知道胶囊在哪；
+            // 外环是极坐标形状（扇形段），坐标算不准就点不到/拖不中 —— 所以由程序侧给出。
+            // 下标越界时返回 0（测试据此判断「没有这个段」）。
             let st = state_of(hwnd);
+            let want = w.0;
             let mut packed: usize = 0;
             if let Some(ai) = st.active_app.filter(|&a| a < st.apps.len()) {
-                if !st.apps[ai].items.is_empty() {
-                    let (segs, _rots, rads) = chip_layout(st, ai);
-                    let (cx, cy) = polar(rads[0], (segs[0].0 + segs[0].1) * 0.5);
+                let (segs, _rots, rads) = chip_layout(st, ai);
+                if want < segs.len() {
+                    let s = segs[want];
+                    let (cx, cy) = polar(rads[want], (s.0 + s.1) * 0.5);
                     let sx = (cx as i32 + st.win_x).clamp(0, 65535);
                     let sy = (cy as i32 + st.win_y).clamp(0, 65535);
                     packed = ((sy as usize) << 16) | (sx as usize);
