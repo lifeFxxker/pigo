@@ -1,25 +1,76 @@
-# ── 构建产物 ──
-target/
-/radial-launcher/target/
-/radial-launcher/dist/
-/radial-launcher/*.exe
+# ── Rust build artifacts ──
+/target
+**/*.rs.bak
 
-# ── 临时文件（项目约定：下划线前缀 = 用完即弃）──
-/radial-launcher/_*
+# ── Packaging output ──
+/dist
+*.zip
 
-# ── 运行期数据（含本机个人路径 / 书签，不应入库）──
-# 首次运行会自动在 exe 同目录生成默认 settings.ini，无需提交
-/radial-launcher/settings.ini
-/radial-launcher/settings.ini.bak
-/radial-launcher/radial_log.txt
-/radial-launcher/draglog.txt
-/radial-launcher/*.bmp
+# ── Dev scratch (all underscore-prefixed entries at repo root) ──
+/_*
+_*.py
+_*.txt
+_*.ini
 
-# 位图中间产物（都有对应的 .png，不必入库）
-*.bmp
+# ── One-off mock / patch helpers (not part of the shipped tool) ──
+mock_*.py
+patch_*.py
+ring_geom.py
+zoom.py
 
-# ── 与源码无关 ──
-/.workbuddy/
-/radial-launcher - 副本/
+# ── Private config (contains the user's real pinned paths) ──
+settings.ini
+drag_backup.ini
+
+# ── Built binaries ──
+*.exe
+
+# ── Python caches ──
 __pycache__/
 *.pyc
+
+# ── IDE ──
+.idea/
+.vscode/
+
+# ── Misc ──
+@AutomationLog.txt
+*.bmp
+
+# ── Dev render dumps & logs at repo root (not part of the project) ──
+*.png
+!design/preview-apps.png
+!design/preview-chips.png
+!design/preview-live.png
+!design/preview-ring.png
+*.html
+*.jpg
+err.txt
+wincap.log
+
+# ── Design/dev-only assets (README uses only the 4 preview pngs above) ──
+/shots
+/design/demos
+/design/*.bmp
+/design/_*.png
+/design/settings.ini
+/design/preview-ring-jupiter*.png
+/design/hooktest.ps1
+/design/mock_liquid_glass.html
+/design/ring-jupiter.html
+design/patch*.py
+
+# ── Local dev memory / private notes (never public) ──
+.workbuddy/
+
+# ── Duplicate / leftover project copies ──
+radial-launcher*/
+
+# ── Misc scripts & logs ──
+*.bat
+*.log
+draglog.txt
+radial_log.txt
+
+# ── Leftover renamed subdir (code now lives at repo root) ──
+/pigo/

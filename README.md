@@ -1,88 +1,73 @@
-# 径向启动器（Radial Launcher）
+# Pigo
 
-一个**极轻量的 Windows 径向菜单启动器**。用 Rust 直接调 Win32 API 手写渲染，
-没有 UI 框架、没有第三方运行时依赖 —— 单个 exe，绿色免安装。
+> A radial (pie-menu) app launcher for Windows — fast, mouse/keyboard-driven, with live window previews.
 
-```
-radial-launcher/          ← 源码（Rust 项目）
-├─ src/main.rs            ← 全部实现（单文件，约 357KB）
-├─ app.rc / app.ico       ← exe 图标资源
-├─ build.rs               ← 调 Windows SDK 的 rc.exe 编译图标资源
-├─ make_icon.py           ← 按中心头像的真实几何生成 app.ico
-├─ package.py             ← 一键打包（编译 → 校验 → dist/ → zip）
-├─ ring_geom.py           ← 布局公式的 Python 镜像（改 Rust 布局要同步改它）
-└─ test_*.py              ← 自动化回归测试
-```
+pigo 是一个 Windows 上的**圆形双环菜单启动器**：快捷键/鼠标手势呼出，内环放常用应用、外环放它的窗口，悬停即见实时预览。原生 Win32 实现，零第三方运行时，单文件 exe（约 700KB）。
 
-## 特性
+**English:** Pigo is a radial-menu launcher for Windows 10/11 (x64). No UI framework — pure Win32 + `windows-rs`. It shows a radial menu centered on the cursor: the inner ring holds your pinned apps, the outer ring holds that app's open windows, and hovering a window shows a live DWM thumbnail (works even for minimized windows).
 
-- **中键 / 鼠标侧键 / 长按右键** 呼出轮盘（三个开关可独立启用）
-- **内环** = 应用图标；**外环** = 该应用的内容，点一下直接打开
-- 外环是**圆角环形扇区**（梯形段），颜色、描边、投影与内环底板完全一致
-- **双击外环段就地改名**；**按住图标拖出盘外移除**
-- 中心是**会呼吸、会眨眼、眼神跟着鼠标走**的表情球（拖动时还会有情绪）
-- 三级交互状态：常驻模式 / 键盘全程可控
+## Screenshots
 
-## 设计基准
+| 主盘 (inner ring) | 外环胶囊 (outer chips) |
+| --- | --- |
+| ![ring](design/preview-ring.png) | ![chips](design/preview-chips.png) |
 
-- **全中性灰阶**，界面里唯一有颜色的东西是**真实的应用图标**
-- 扁平纯色：零渐变、零模糊；投影是**不模糊的硬投影**
-- 统一圆角方块是「整齐」的唯一来源 —— 无论图标自带圆形/白纸/满出血方块，
-  最终都收敛成同一个圆角方块（纹理阶段就裁好）
+| 实时预览 (live preview) | 应用管理 (app management) |
+| --- | --- |
+| ![live](design/preview-live.png) | ![apps](design/preview-apps.png) |
 
-## 构建
+## Features
 
-需要 **Rust 工具链**（stable）。图标资源需要 Windows SDK 的 `rc.exe`（找不到会跳过，
-只是 exe 没有自定义图标，不影响功能）。
+- **径向菜单**：光标居中，内环 = 固定应用，外环 = 该应用的窗口（按默认间距贴合在对应内环图标附近）。
+- **拖入即固定**：把 `.lnk` / 文件夹 / 文件拖进内环磁贴；支持重排、改名、删除。
+- **运行中标识**：正在运行的应用，内环图标下显示圆点；悬停有窗口的应用，外环列出其窗口，悬停即弹**实时预览**（`DwmRegisterThumbnail`，最小化窗口也有画面）。
+- **液态玻璃材质**：极淡，仅作用于轮盘；设置页始终为纸面。
+- **内置动作**：如 `@act:start` 打开 Windows 开始菜单。
+- **自启 / 常驻 / 自定义呼出**：呼出方式可在设置里改为鼠标手势或键盘。
+- **单文件、零依赖**：编译产物一个 `Pigo.exe`，无需 .NET / 运行时。
 
-```sh
-cd radial-launcher
+## Requirements
+
+- Windows 10 / 11, **x64**
+- Rust (edition 2021) — 通过 [rustup](https://rustup.rs/) 安装 `cargo`
+- **Windows SDK**（用于嵌入 exe 图标；缺失时自动跳过图标，不影响编译）
+- MSVC 工具链（Visual Studio Build Tools 或 `winget install Microsoft.VisualStudio.BuildTools`）
+
+## Build
+
+```bash
 cargo build --release
+# 产物: target/release/Pigo.exe
 ```
 
-产物：`target/release/radial-launcher.exe`（Release 是 **GUI 子系统**，双击不弹黑窗口）。
+> ⚠️ `Cargo.toml` 中 `lto = "thin"` **不要改为 `"true"`（fat LTO）**：当前 rustc 会对这份 unsafe FFI 代码误编译，启动即崩 `0xC0000409`。
 
-### 一键打包
+打包成单文件 zip（含用法说明）：
 
-```sh
+```bash
 python package.py
+# 输出: dist/Pigo.exe  +  dist/pigo-v1.0.0-win64.zip
 ```
 
-会编译 → 校验 PE 子系统与体积 → 产出 `dist/`（`RadialLauncher.exe` + `README.txt` + zip）。
+## Usage
 
-### 重新生成图标
+- **呼出**：默认快捷键 / 鼠标手势（在设置里可改）；菜单在光标处弹出。
+- **固定应用**：把 `.lnk` / 文件夹 / 文件拖进内环磁贴；它的窗口会自动归到对应应用的外环。
+- **设置**：在菜单里打开设置页（纸面，非玻璃）。
+- **内置动作**：`@act:start` 打开 Windows 开始菜单。
+- **运行中标识**：应用运行时内环图标下显示圆点；悬停有窗口的应用，外环列出其窗口，悬停即实时预览。
 
-```sh
-python make_icon.py
+## Project layout
+
+```
+src/main.rs            主程序（全部逻辑，原生 Win32）
+app.rc / app.ico       版本信息与 exe 图标
+build.rs               用 Windows SDK 的 rc.exe 嵌入图标（缺失则跳过）
+package.py             一键打包成 zip
+test_*.py              自动化 UI 测试（需先启动 Pigo.exe）
+design/preview-*.png   README 用预览图
 ```
 
-按 `src/main.rs` 里中心头像球的几何参数（球 = ink、眼睛 = paper 药丸）生成多尺寸
-`app.ico`。小尺寸会自动补偿眼睛比例；球外加了一圈**极淡的白色描边**，
-这样在深色任务栏上也看得见（浅色底上它会融进背景）。
+## License
 
-## 运行
-
-双击 `RadialLauncher.exe` 即可。配置在同目录的 `settings.ini`（首次运行自动生成）。
-
-`RadialLauncher.exe --quit` 退出正在运行的实例。
-
-## 测试
-
-```sh
-python test_rename.py     # 双击改名
-python test_drag.py       # 拖出移除
-python test_rhold.py      # 右键状态机（不变式）
-```
-
-这些脚本通过程序内置的**诊断消息**驱动（`WM_APP_*`），不需要注入真实输入 ——
-本进程装着全局鼠标钩子时，注入输入会互相卡死。
-
-## 一些踩过的坑（写给未来的自己）
-
-- 鼠标/键盘**全局钩子回调里只许做原子操作 + PostMessage**。在回调里注入鼠标事件会自锁。
-- **键盘钩子要按需装卸**：菜单关着时它什么都不做，但挂在输入链上会被别人的钩子堵住，
-  表现为「打字几秒才出来」。
-- **`UpdateLayeredWindow` 必须用预乘 alpha**，而 `blend_over` 产出的是非预乘。
-- 32bpp 内存 DIB 上 **GDI 全不可靠**（`Pie` 是实心扇形、`DrawTextW` 的抗锯齿会污染周围），
-  所以全部走手写像素 + 内置点阵字库。
-- 「取最近一级 mip」这种函数，**先确认数组方向** —— 顺着遍历会永远命中第一项。
+[MIT](LICENSE) © 2026 pigo

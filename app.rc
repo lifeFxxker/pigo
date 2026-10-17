@@ -16,7 +16,7 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName", "pigo"
-      VALUE "FileDescription", "pigo - radial launcher"
+      VALUE "FileDescription", "pigo"
       VALUE "FileVersion", "1.0.0"
       VALUE "InternalName", "pigo"
       VALUE "LegalCopyright", "Copyright (C) 2026 pigo"

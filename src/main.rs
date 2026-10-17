@@ -8,7 +8,7 @@
 //! 等诊断信息都靠 stdout 看。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! pigo —— 原生 Win32 径向启动器（自带软件渲染，零运行时依赖）
+//! pigo —— 原生 Win32 圆形双环菜单启动器（自带软件渲染，零运行时依赖）
 //!
 //! 视觉（照搬 TheRing，参考 design/demos/demo-thering.html 与 design/thering_cover.jpg）：
 //!   一整块圆形玻璃盘（盘面跟随壁纸染色）+ 应用图标立在盘面一圈
@@ -6589,7 +6589,7 @@ unsafe fn dump_all(dir: &str) {
             st.window_capture = Some(WindowCapture {
                 hwnd: 0,
                 exe: "c:\\windows\\explorer.exe".to_string(),
-                title: "radial-launcher - 文件资源管理器".to_string(),
+                title: "pigo - 文件资源管理器".to_string(),
                 relaunch: String::new(),
                 test: true,
             });
