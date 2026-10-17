@@ -1,72 +1,94 @@
 # Pigo
 
-> A radial (pie-menu) app launcher for Windows — fast, mouse/keyboard-driven, with live window previews.
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows&logoColor=white" alt="Platform">
+  <img src="https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
 
-pigo 是一个 Windows 上的**圆形双环菜单启动器**：快捷键/鼠标手势呼出，内环放常用应用、外环放它的窗口，悬停即见实时预览。原生 Win32 实现，零第三方运行时，单文件 exe（约 700KB）。
+**pigo** is a radial (pie-menu) app launcher for Windows. Summon a cursor-centered dial with a mouse gesture or hotkey, pin your apps to the inner ring, and peek live window previews by hovering the outer ring — all in a single native executable with no runtime dependencies.
 
-**English:** Pigo is a radial-menu launcher for Windows 10/11 (x64). No UI framework — pure Win32 + `windows-rs`. It shows a radial menu centered on the cursor: the inner ring holds your pinned apps, the outer ring holds that app's open windows, and hovering a window shows a live DWM thumbnail (works even for minimized windows).
+**中文简介：** pigo 是一个 Windows 平台的光标居中双环启动器。按住鼠标中键（或侧键）在光标处弹出轮盘，内环固定常用应用、外环展开该应用当前打开的窗口；悬停即显示实时窗口预览（基于 DWM 缩略图，最小化窗口也有画面）。原生 Win32 实现，单文件 exe，零运行时依赖。
 
 ## Screenshots
 
-| 主盘 (inner ring) | 外环胶囊 (outer chips) |
+| Inner ring (主盘) | Outer chips (外环胶囊) |
 | --- | --- |
 | ![ring](design/preview-ring.png) | ![chips](design/preview-chips.png) |
 
-| 实时预览 (live preview) | 应用管理 (app management) |
+| Live preview (实时预览) | App management (应用管理) |
 | --- | --- |
 | ![live](design/preview-live.png) | ![apps](design/preview-apps.png) |
 
 ## Features
 
-- **径向菜单**：光标居中，内环 = 固定应用，外环 = 该应用的窗口（按默认间距贴合在对应内环图标附近）。
-- **拖入即固定**：把 `.lnk` / 文件夹 / 文件拖进内环磁贴；支持重排、改名、删除。
-- **运行中标识**：正在运行的应用，内环图标下显示圆点；悬停有窗口的应用，外环列出其窗口，悬停即弹**实时预览**（`DwmRegisterThumbnail`，最小化窗口也有画面）。
-- **液态玻璃材质**：极淡，仅作用于轮盘；设置页始终为纸面。
-- **内置动作**：如 `@act:start` 打开 Windows 开始菜单。
-- **自启 / 常驻 / 自定义呼出**：呼出方式可在设置里改为鼠标手势或键盘。
-- **单文件、零依赖**：编译产物一个 `Pigo.exe`，无需 .NET / 运行时。
+- **Cursor-centered dual ring** — The inner ring holds your pinned apps; the outer ring expands that app's open windows, laid out at the default spacing right next to the corresponding inner icon. Hit-testing and drawing share one layout routine, so what you see is exactly what you click.
+- **Drag-to-pin** — Drop a `.lnk`, folder, or file onto an inner tile to pin it. Reorder, rename, and remove are all supported.
+- **Live running state** — A running app shows a dot under its inner icon. Hover an app that has windows and the outer ring lists them; hovering a window pops a **live preview** (`DwmRegisterThumbnail`, including minimized windows).
+- **Liquid-glass material** — A very subtle glass effect applied to the dial only; the settings page stays flat paper for readability.
+- **Built-in actions** — e.g. `@act:start` opens the Windows Start menu directly.
+- **Autostart / resident / custom invoke** — Run at login and stay in the tray. Invocation can be middle button, side button, long-press right button, or a custom key combo (e.g. `Ctrl+W`).
+- **Single file, zero dependencies** — The build output is one `Pigo.exe`; no .NET or other runtime required.
 
-## Requirements
+## Installation
+
+### Download a prebuilt package
+
+Grab `pigo-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pigo/releases) page, unzip, and run `Pigo.exe`.
+
+> If no Release is published yet, build it locally — see below.
+
+### Build from source
+
+**Prerequisites**
 
 - Windows 10 / 11, **x64**
-- Rust (edition 2021) — 通过 [rustup](https://rustup.rs/) 安装 `cargo`
-- **Windows SDK**（用于嵌入 exe 图标；缺失时自动跳过图标，不影响编译）
-- MSVC 工具链（Visual Studio Build Tools 或 `winget install Microsoft.VisualStudio.BuildTools`）
-
-## Build
+- Rust (edition 2021) via [rustup](https://rustup.rs/)
+- MSVC toolchain — Visual Studio Build Tools, or `winget install Microsoft.VisualStudio.BuildTools`
+- Windows SDK (used to embed the exe icon; if absent, the icon step is skipped and the build still succeeds)
 
 ```bash
 cargo build --release
-# 产物: target/release/Pigo.exe
+# output: target/release/Pigo.exe
 ```
 
-> ⚠️ `Cargo.toml` 中 `lto = "thin"` **不要改为 `"true"`（fat LTO）**：当前 rustc 会对这份 unsafe FFI 代码误编译，启动即崩 `0xC0000409`。
+> ⚠️ Keep `lto = "thin"` in `Cargo.toml`. Do **not** switch it to `"true"` (fat LTO): the current rustc miscompiles this project's `unsafe` FFI code, causing an immediate crash on launch (`0xC0000409`).
 
-打包成单文件 zip（含用法说明）：
+Package into a single-file zip (with a usage note):
 
 ```bash
 python package.py
-# 输出: dist/Pigo.exe  +  dist/pigo-v1.0.0-win64.zip
+# output: dist/Pigo.exe  and  dist/pigo-v1.0.0-win64.zip
 ```
 
 ## Usage
 
-- **呼出**：默认快捷键 / 鼠标手势（在设置里可改）；菜单在光标处弹出。
-- **固定应用**：把 `.lnk` / 文件夹 / 文件拖进内环磁贴；它的窗口会自动归到对应应用的外环。
-- **设置**：在菜单里打开设置页（纸面，非玻璃）。
-- **内置动作**：`@act:start` 打开 Windows 开始菜单。
-- **运行中标识**：应用运行时内环图标下显示圆点；悬停有窗口的应用，外环列出其窗口，悬停即实时预览。
+- **Invoke** — By default, hold the **middle mouse button** (or a side button) to pop the dial at the cursor; release to execute, `Esc` / any other key cancels. In settings you can switch to long-press right button or record a custom combo such as `Ctrl+W`.
+- **Pin an app** — Drag a `.lnk`, folder, or file onto an inner tile. Its windows are grouped onto that app's outer ring automatically.
+- **Running indicator** — A dot under an inner icon means the app is running; hovering an app that owns windows lists them on the outer ring with live previews on hover.
+- **Built-in action** — `@act:start` opens the Windows Start menu.
+- **Settings** — Open the settings page from the menu (flat paper style, not glass).
+
+## Configuration
+
+pigo stores its config at `%APPDATA%\pigo\settings.ini`, created automatically on first run. The app list, invoke method, and appearance are all edited from the in-app settings page — manual editing is rarely needed.
 
 ## Project layout
 
 ```
-src/main.rs            主程序（全部逻辑，原生 Win32）
-app.rc / app.ico       版本信息与 exe 图标
-build.rs               用 Windows SDK 的 rc.exe 嵌入图标（缺失则跳过）
-package.py             一键打包成 zip
+src/main.rs            全部逻辑，原生 Win32 实现（自有软件渲染器）
+app.rc / app.ico       exe 版本信息与图标
+build.rs               调用 Windows SDK 的 rc.exe 嵌入图标（缺失则跳过）
+package.py             一键打包为 zip
 test_*.py              自动化 UI 测试（需先启动 Pigo.exe）
 design/preview-*.png   README 用预览图
 ```
+
+## Technical notes
+
+- **Pure Win32 + `windows-rs`** — No UI framework and a self-contained software renderer, which keeps the binary small (~700KB), launches fast, and carries no runtime.
+- **Live previews via DWM thumbnails** — Hover previews use `DwmRegisterThumbnail`, showing the target window's live picture (including a minimized window's snapshot) rather than a static screenshot, so video and animation stay live.
+- **Layered window for the glass** — The dial renders through `UpdateLayeredWindow` with premultiplied alpha. Because a layered (ULW) window cannot be a DWM thumbnail source, previews use a separate plain top-level window.
 
 ## License
 
