@@ -3,9 +3,9 @@
 
 用法（在项目根目录）：python package.py
 产物：
-  dist/RadialLauncher.exe      主程序（单文件）
+  dist/Pigo.exe                主程序（单文件）
   dist/README.txt              用法说明
-  dist/径向启动器-v<版本>-win64.zip   可直接发给别人
+  dist/pigo-v<版本>-win64.zip        可直接发给别人
 
 ⚠️ 打包前请确认没有实例在跑 —— 正在运行的 exe 被系统锁着，覆盖会失败
 （报 "Device or resource busy" / "另一个程序正在使用此文件"）。
@@ -21,9 +21,9 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, 'dist')
-BUILT = os.path.join(HERE, 'target', 'release', 'radial-launcher.exe')
-NAME = 'RadialLauncher.exe'
-VERSION = '0.1.0'
+BUILT = os.path.join(HERE, 'target', 'release', 'Pigo.exe')
+NAME = 'Pigo.exe'
+VERSION = '1.0.0'
 
 
 def sh(cmd, **kw):
@@ -33,7 +33,8 @@ def sh(cmd, **kw):
 
 def kill_running():
     """先干掉在跑的实例，否则覆盖 exe 会失败。"""
-    for n in (NAME, 'RadialMenu.exe'):
+    # 旧名也要杀：升级过程中可能还挂着上一个版本的实例
+    for n in (NAME, 'Pigo.exe', 'RadialMenu.exe', 'pigo.exe'):
         subprocess.run(['taskkill', '/F', '/IM', n], capture_output=True)
 
 
@@ -77,13 +78,32 @@ def main():
         print('（dist/README.txt 不存在，跳过）')
 
     print('=== 4/4 打 zip ===', flush=True)
-    zname = '径向启动器-v%s-win64.zip' % VERSION
+    zname = 'pigo-v%s-win64.zip' % VERSION
     zpath = os.path.join(DIST, zname)
+    # ⚠️⚠️ 只能打**白名单**，绝不能 `sorted(os.listdir(DIST))`！
+    # 之前只要在 `dist/` 里跑过程序，运行时留下的 `settings.ini`
+    # （**开发者的私有配置**：listening=0 / guide_seen=0 / 自己的应用列表）、
+    # `settings.ini.bak`、`radial_log.txt`、`draglog.txt` 就会被**一起打进发布包**
+    # → 用户解压后一启动就「默认不监听」（继承了开发者的 listening=0），
+    # 引导状态、应用列表也全是别人的。用户 2026-10-14 报的就是这个。
+    RELEASE_FILES = [NAME, 'README.txt']
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
-        for fn in sorted(os.listdir(DIST)):
-            if fn == zname:
-                continue
-            z.write(os.path.join(DIST, fn), fn)
+        for fn in RELEASE_FILES:
+            fp = os.path.join(DIST, fn)
+            if os.path.exists(fp):
+                z.write(fp, fn)
+            else:
+                print('⚠️ 缺少发布文件：%s（zip 会不完整）' % fn)
+    # 自查：压缩包里**不许出现** ini / 备份 / 日志
+    with zipfile.ZipFile(zpath) as z:
+        names = z.namelist()
+        bad = [n for n in names
+               if n.lower().endswith(('.ini', '.bak', '.log'))
+               or (n.lower().endswith('.txt') and n.lower() != 'readme.txt')]
+        if bad:
+            print('❌ 发布包混入了不该有的文件：%s' % bad)
+            return 1
+        print('发布包内容：%s' % names)
     print('已生成 %s（%.1f KB）' % (zpath, os.path.getsize(zpath) / 1024))
     print()
     print('打包完成：')

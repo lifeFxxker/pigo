@@ -1,4 +1,4 @@
-import ctypes, time, subprocess, sys
+import ctypes, time, subprocess, sys, os
 from ctypes import wintypes as w
 
 u = ctypes.WinDLL('user32', use_last_error=True)
@@ -35,7 +35,9 @@ def tap(vk):
     u.keybd_event(vk, 0, KEYUP, 0)
 
 def main():
-    p = subprocess.Popen([r'RadialLauncher.exe'],
+    os.environ['PIGO_CONFIG_DIR'] = os.path.dirname(os.path.abspath(__file__))
+    os.environ['RL_INSTANCE'] = 'uxtest'
+    p = subprocess.Popen([r'Pigo.exe'],
                          creationflags=0x00000008 | 0x00000200,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     time.sleep(2.5)

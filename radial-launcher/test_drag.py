@@ -16,9 +16,9 @@ from ctypes import wintypes as w
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SANDBOX = os.path.join(HERE, os.environ.get('RL_SANDBOX', '_dragtest'))
-# 沙箱里的 exe 名。⚠️ 别硬编码 RadialLauncher.exe —— 那个文件常被僵尸实例占着，
+# 沙箱里的 exe 名。⚠️ 别硬编码 Pigo.exe —— 那个文件常被僵尸实例占着，
 # 复制会失败。测试统一用**正式名**（沙箱里放副本，别碰项目根目录那个）。
-EXE_NAME = os.environ.get('RL_EXE', 'RadialLauncher.exe')
+EXE_NAME = os.environ.get('RL_EXE', 'Pigo.exe')
 WM_APP = 0x8000
 WM_APP_SHOW = WM_APP + 1
 WM_APP_CANCEL = WM_APP + 4
@@ -83,9 +83,14 @@ def main():
     subprocess.run([os.path.join(SANDBOX, EXE_NAME), '--quit'],
                    cwd=SANDBOX, capture_output=True)
     time.sleep(1.2)
+    # 每次都用项目里那份配置重置沙箱：本用例会**真的删掉**应用/胶囊，
+    # 不重置的话沙箱越跑越空，最后「没东西可拖」而假 FAIL。
+    import shutil as _sh
+    _sh.copy(os.path.join(HERE, 'settings.ini'), os.path.join(SANDBOX, 'settings.ini'))
     seed_chip_if_needed()
     env = dict(os.environ)
     env['RL_INSTANCE'] = os.environ.get('RL_TAG', 'd2')
+    env['PIGO_CONFIG_DIR'] = SANDBOX
     p = subprocess.Popen([os.path.join(SANDBOX, EXE_NAME)], cwd=SANDBOX,
                          env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2.5)
@@ -112,8 +117,18 @@ def main():
     def open_menu():
         sim(CX, CY, 2)
         SM(host, WM_APP_SHOW, 0, 0)
-        time.sleep(0.7)
+        # ⚠️ 必须**轮询等环窗口真的可见**再往下驱动。固定 sleep 0.7s 不够稳：
+        # 启动/退出残留会拖慢 show_menu，菜单还没显示就发 DRAGSIM →
+        # `drag_end` 因为 `MENU_OPEN=false` 整段跳过 → 后面「移除」类断言全部假 FAIL。
         ring = u.FindWindowW('RLRing', None)
+        for _ in range(40):
+            if ring and u.IsWindowVisible(ring):
+                break
+            time.sleep(0.1)
+            ring = u.FindWindowW('RLRing', None)
+        time.sleep(0.2)
+        if not ring:
+            return 0, 0
         rect = w.RECT()
         u.GetWindowRect(ring, ctypes.byref(rect))
         wx, wy = rect.left, rect.top
@@ -248,6 +263,27 @@ def main():
         check('胶囊 5 秒到 → 真的移除并落盘', removed,
               '%d -> %d' % (m0, count_items(owner)))
         snap(host, 'live_chip_removed.png')
+
+    # ⑧ 拖出后**倒计时期间关掉轮盘** → 撤销窗口结束，立即落盘移除（不用干等 5 秒）。
+    #    用户 2026-10-12 反馈：以前关轮盘会把内容放回（删除作废），必须等倒计时走完，
+    #    「那不扯呢吗」。现在撤销只认显式点「取消」按钮，关轮盘 = 确认删除。
+    wx, wy = ensure_menu() or (wx, wy)
+    n2 = len(read_apps())
+    r2, _icon2 = G.ring_layout(n2)
+    disc2 = G.disc_r(n2)
+    ang = math.radians(1 * 360.0 / n2)
+    ix8 = int(wx + G.CC + r2 * math.sin(ang))
+    iy8 = int(wy + G.CC - r2 * math.cos(ang))
+    ox8 = int(wx + G.CC + disc2 + 90)
+    sim(ix8, iy8, 0)
+    sim(ox8, wy + G.CC, 1)
+    time.sleep(0.6)                       # 远小于 5 秒的撤销窗口
+    check('⑧ 关轮盘前仍在倒计时（尚未移除）', len(read_apps()) == n2)
+    SM(host, WM_APP_CANCEL, 0, 0)         # 倒计时期间**关闭轮盘**
+    time.sleep(0.6)
+    apps8 = read_apps()
+    check('⑧ 倒计时期间关掉轮盘 → 立即落盘移除（不用等 5 秒）',
+          len(apps8) == n2 - 1, '%d -> %d' % (n2, len(apps8)))
 
     SM(host, WM_APP_CANCEL, 0, 0)
     time.sleep(0.4)

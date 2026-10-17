@@ -18,7 +18,7 @@ from ctypes import wintypes as w
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SANDBOX = os.path.join(HERE, os.environ.get('RL_SANDBOX', '_edittest'))
-EXE = os.path.join(SANDBOX, 'RadialLauncher.exe')
+EXE = os.path.join(SANDBOX, 'Pigo.exe')
 INI = os.path.join(SANDBOX, 'settings.ini')
 
 WM_APP_EDITSIM = 0x8000 + 17
@@ -72,18 +72,19 @@ def main():
     if os.path.isdir(SANDBOX):
         shutil.rmtree(SANDBOX, ignore_errors=True)
     os.makedirs(SANDBOX, exist_ok=True)
-    for f in ('RadialLauncher.exe',):
+    for f in ('Pigo.exe',):
         src = os.path.join(HERE, f)
         if os.path.exists(src):
             shutil.copy(src, EXE)
     if not os.path.exists(EXE):
-        src = os.path.join(HERE, 'target', 'release', 'radial-launcher.exe')
+        src = os.path.join(HERE, 'target', 'release', 'pigo.exe')
         shutil.copy(src, EXE)
     shutil.copy(os.path.join(HERE, 'settings.ini'), INI)
 
     tag = os.environ.get('RL_TAG', 'e1')
     env = dict(os.environ)
     env['RL_INSTANCE'] = 'edit' + tag
+    env['PIGO_CONFIG_DIR'] = SANDBOX
     # ⚠️ **必须用绝对路径**启动：exe 只把 ini 写到「自己所在目录」（exe_dir()），
     # 用相对名 + cwd= 时 Windows 的解析会落到**项目根目录**那份真配置上。
     # 这个坑真踩过：测试把用户 settings.ini 的「下载」改成了「下载ABC」。

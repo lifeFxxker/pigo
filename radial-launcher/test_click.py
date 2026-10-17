@@ -43,7 +43,9 @@ def check(name, ok, extra=''):
 
 
 def main():
-    p = subprocess.Popen([r'RadialLauncher.exe'],
+    os.environ['PIGO_CONFIG_DIR'] = os.path.dirname(os.path.abspath(__file__))
+    os.environ['RL_INSTANCE'] = 'clicktest'
+    p = subprocess.Popen([r'Pigo.exe'],
                          creationflags=0x00000008 | 0x00000200,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     time.sleep(2.5)

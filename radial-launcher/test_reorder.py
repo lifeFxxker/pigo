@@ -27,7 +27,7 @@ import ring_geom as G
 HERE = os.path.dirname(os.path.abspath(__file__))
 SANDBOX = os.path.join(HERE, os.environ.get('RL_SANDBOX', '_reorder'))
 TAG = os.environ.get('RL_TAG', 'ro')
-EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'RadialLauncher.exe'))
+EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'Pigo.exe'))
 INI = os.path.join(SANDBOX, 'settings.ini')
 
 WM_APP = 0x8000
@@ -85,12 +85,21 @@ def main():
     if os.path.isdir(SANDBOX):
         shutil.rmtree(SANDBOX, ignore_errors=True)
     os.makedirs(SANDBOX)
-    shutil.copy(EXE_SRC, os.path.join(SANDBOX, 'RadialLauncher.exe'))
+    shutil.copy(EXE_SRC, os.path.join(SANDBOX, 'Pigo.exe'))
     shutil.copy(os.path.join(HERE, 'settings.ini'), INI)
+    # ⚠️⚠️ 必须把 onboarding 四步标志**全部置位**：只要 `onb_drag=0`（默认），
+    # 内环末位就会多一个「教学虚线槽位」→ `n` 变成 n+1 → 整环几何全变，
+    # 本文件按坐标算出来的落点/槽位角度就全对不上了（2026-10-14 加的教学槽）。
+    _t = open(INI, encoding='utf-8').read()
+    if 'onb_drag=' not in _t:
+        _t = _t.replace('[设置]\r\n',
+                        '[设置]\r\nonb_drag=1\r\nonb_chip=1\r\nonb_move=1\r\nonb_edit=1\r\n', 1)
+        open(INI, 'w', encoding='utf-8', newline='').write(_t)
 
     env = dict(os.environ)
     env['RL_INSTANCE'] = 'reorder' + TAG
-    proc = subprocess.Popen([os.path.abspath(os.path.join(SANDBOX, 'RadialLauncher.exe'))],
+    env['PIGO_CONFIG_DIR'] = SANDBOX
+    proc = subprocess.Popen([os.path.abspath(os.path.join(SANDBOX, 'Pigo.exe'))],
                             cwd=SANDBOX, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     # GUI 子系统程序没有控制台，但父进程给了管道 → `println!` 仍能读到。
@@ -125,8 +134,17 @@ def main():
     def open_menu():
         sim(CX, CY, 2)
         SM(host, WM_APP_SHOW, 0, 0)
-        time.sleep(0.7)
+        # ⚠️ 轮询等环窗口**真的可见**再往下驱动：固定 sleep 在机器忙 / 有残留实例时不够稳，
+        # 菜单还没显示就发模拟消息 → 状态机按「菜单没开」整段跳过 → 一串假 FAIL。
         ring = u.FindWindowW('RLRing', None)
+        for _ in range(40):
+            if ring and u.IsWindowVisible(ring):
+                break
+            time.sleep(0.1)
+            ring = u.FindWindowW('RLRing', None)
+        time.sleep(0.2)
+        if not ring:
+            return 0, 0
         rect = w.RECT()
         u.GetWindowRect(ring, ctypes.byref(rect))
         wx, wy = rect.left, rect.top

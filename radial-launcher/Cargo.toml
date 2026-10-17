@@ -1,13 +1,26 @@
 [package]
-name = "radial-launcher"
-version = "0.1.0"
+name = "pigo"
+version = "1.0.0"
 edition = "2021"
+description = "A radial (pie-menu) app launcher for Windows with live window previews"
+authors = ["pigo"]
+license = "MIT"
+repository = "https://github.com/lifeFxxker/pigo"
+homepage = "https://github.com/lifeFxxker/pigo"
+readme = "README.md"
+keywords = ["launcher", "radial", "windows", "productivity", "pie-menu"]
+categories = ["gui", "command-line-utilities"]
+
+[[bin]]
+name = "Pigo"
+path = "src/main.rs"
 
 [dependencies]
 windows-core = "0.58"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Imaging",
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
@@ -36,7 +49,10 @@ windows = { version = "0.58", features = [
 
 [profile.release]
 opt-level = 3
-lto = true
+# ⚠️ 不能用 `lto = true`（fat LTO）：rustc 1.96.0 全量 clean 构建会 miscompile
+# 这份 unsafe FFI 代码，启动即崩 0xC0000409（warm 缓存构建侥幸不触发）。
+# `thin` 仍做跨 crate 内联但不整链重优化，体积小且稳定。
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true

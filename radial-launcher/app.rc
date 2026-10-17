@@ -1,3 +1,32 @@
 // exe 图标资源。ID 用 1，托盘那边 LoadImageW(hinst, MAKEINTRESOURCE(1)) 取的就是它。
 // 图标由 make_icon.py 按中心头像球的真实几何生成（黑球 + 两只白色药丸眼）。
 1 ICON "app.ico"
+
+// exe 属性页（右键 → 属性 → 详细信息）里显示的产品信息。
+// ⚠️ 值**只用 ASCII** —— 这个文件不是 UTF-8 BOM，rc.exe 会按本地代码页解释，
+//    写中文会变成乱码（注释无所谓，属性页上给人看的字不能花）。
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "pigo"
+      VALUE "FileDescription", "pigo - radial launcher"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "InternalName", "pigo"
+      VALUE "LegalCopyright", "Copyright (C) 2026 pigo"
+      VALUE "OriginalFilename", "Pigo.exe"
+      VALUE "ProductName", "pigo"
+      VALUE "ProductVersion", "1.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

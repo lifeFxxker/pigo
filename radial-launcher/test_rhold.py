@@ -28,10 +28,10 @@ from ctypes import wintypes as w
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SANDBOX = os.path.join(HERE, os.environ.get('RL_SANDBOX', '_rholdtest'))
-# ⚠️ 用**新**构建产物：项目根的 `RadialLauncher.exe` 可能被一个卡死的僵尸壳占着
+# ⚠️ 用**新**构建产物：项目根的 `Pigo.exe` 可能被一个卡死的僵尸壳占着
 # （钩子线程卡在 win32k → 文件锁住、也换不掉），拿它测会测到旧版本。
-EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'RadialLauncher.exe'))
-EXE = os.path.join(SANDBOX, 'RadialLauncher.exe')
+EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'Pigo.exe'))
+EXE = os.path.join(SANDBOX, 'Pigo.exe')
 
 u = ctypes.windll.user32
 u.FindWindowW.restype = w.HWND
@@ -79,6 +79,7 @@ def main():
 
     env = dict(os.environ)
     env['RL_INSTANCE'] = 'rhold' + os.environ.get('RL_TAG', '1')
+    env['PIGO_CONFIG_DIR'] = SANDBOX
     proc = subprocess.Popen([os.path.abspath(EXE)], cwd=SANDBOX, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(3.0)

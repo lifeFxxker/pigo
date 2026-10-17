@@ -18,7 +18,7 @@ from ctypes import wintypes as w
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SANDBOX = os.path.join(HERE, os.environ.get('RL_SANDBOX', '_focus'))
-EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'RadialLauncher.exe'))
+EXE_SRC = os.path.join(HERE, os.environ.get('RL_EXE', 'Pigo.exe'))
 TARGET = r'C:\Windows\System32\charmap.exe'
 
 WM_APP = 0x8000
@@ -85,7 +85,7 @@ def main():
     if os.path.isdir(SANDBOX):
         shutil.rmtree(SANDBOX, ignore_errors=True)
     os.makedirs(SANDBOX)
-    shutil.copy(EXE_SRC, os.path.join(SANDBOX, 'RadialLauncher.exe'))
+    shutil.copy(EXE_SRC, os.path.join(SANDBOX, 'Pigo.exe'))
     # ⚠️ `WM_APP_EDITSIM` phase 9 只在「该应用有条目」时才设 active_app/hover_chip
     #    （源码里的守卫），所以这里必须给应用挂一个条目；commit 会启动这个条目。
     with open(os.path.join(SANDBOX, 'settings.ini'), 'w', encoding='utf-8') as f:
@@ -100,7 +100,8 @@ def main():
 
     env = dict(os.environ)
     env['RL_INSTANCE'] = 'foctest'
-    proc = subprocess.Popen([os.path.join(SANDBOX, 'RadialLauncher.exe')], cwd=SANDBOX, env=env,
+    env['PIGO_CONFIG_DIR'] = SANDBOX
+    proc = subprocess.Popen([os.path.join(SANDBOX, 'Pigo.exe')], cwd=SANDBOX, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     import threading
     out = []

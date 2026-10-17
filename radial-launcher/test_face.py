@@ -71,9 +71,11 @@ def pupils():
 def main():
     # 先清场：上一个用例的实例可能还没退干净，单实例互斥会把本次启动吞掉，
     # 表现出来就是「菜单没弹 → 四张 dump 一模一样 → Δ=0」的假 FAIL
-    subprocess.run([r'RadialLauncher.exe', '--quit'], capture_output=True)
+    subprocess.run([r'Pigo.exe', '--quit'], capture_output=True)
     time.sleep(1.0)
-    p = subprocess.Popen([r'RadialLauncher.exe'],
+    os.environ['PIGO_CONFIG_DIR'] = os.path.dirname(os.path.abspath(__file__))
+    os.environ['RL_INSTANCE'] = 'facetest'
+    p = subprocess.Popen([r'Pigo.exe'],
                          creationflags=0x00000008 | 0x00000200,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2.5)
