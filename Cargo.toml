@@ -1,6 +1,6 @@
 [package]
 name = "pigo"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "A radial (pie-menu) app launcher for Windows with live window previews"
 authors = ["pigo"]
