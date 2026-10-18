@@ -101,7 +101,7 @@ src/main.rs            全部逻辑 —— 原生 Win32 + 软件渲染器
 app.rc / app.ico       exe 版本信息与图标
 build.rs               通过 Windows SDK 的 rc.exe 嵌入图标（缺失则跳过）
 package.py             一键打包为 zip
-test_*.py              自动化 UI 测试（需先启动 Pigo.exe）
+tools/                 开发期工具（图标生成 / 日志分析 / 截图与发布脚本，均为可选）
 design/preview-*.png   README 使用的截图
 ```
 

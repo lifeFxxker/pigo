@@ -101,7 +101,7 @@ src/main.rs            All logic — native Win32 + a software renderer
 app.rc / app.ico       Executable version info and icon
 build.rs               Embeds the icon via the Windows SDK rc.exe (skipped if absent)
 package.py             One-step packaging into a zip
-test_*.py              Automated UI tests (launch Pigo.exe first)
+tools/                 Dev-only helpers (icon generation / log analysis / screenshot & release scripts; optional)
 design/preview-*.png   Screenshots used by the README
 ```
 
