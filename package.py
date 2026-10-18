@@ -5,6 +5,7 @@
 产物：
   dist/Pigo.exe                主程序（单文件）
   dist/README.txt              用法说明
+  dist/SHA256SUMS              校验清单（在线升级的独立 release asset，不进 zip）
   dist/pigo-v<版本>-win64.zip        可直接发给别人
 
 ⚠️ 打包前请确认没有实例在跑 —— 正在运行的 exe 被系统锁着，覆盖会失败
@@ -73,6 +74,12 @@ def main():
     kill_running()
     os.makedirs(DIST, exist_ok=True)
     shutil.copy2(BUILT, os.path.join(DIST, NAME))
+    # SHA256SUMS —— 在线升级用（updater 下载后强校验）。
+    # ⚠️ 它是**独立的 release asset**，不进 zip（zip 白名单仍只有 exe+README）。
+    sha = hashlib.sha256(open(os.path.join(DIST, NAME), 'rb').read()).hexdigest()
+    with open(os.path.join(DIST, 'SHA256SUMS'), 'w', encoding='ascii', newline='\n') as f:
+        f.write('%s  %s\n' % (sha, NAME))
+    print('sha256 =', sha)
     # README 若已存在就保留（它不在构建产物里）
     if not os.path.exists(os.path.join(DIST, 'README.txt')):
         print('（dist/README.txt 不存在，跳过）')

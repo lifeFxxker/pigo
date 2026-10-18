@@ -182,6 +182,12 @@ const WM_APP_WINDROP: u32 = WM_APP + 29; // 仅测试：模拟「松手」，按
 /// 后台「启动 / 聚焦窗口」做完了 → UI 线程收尾（清 loading、收起菜单）。
 /// 与 `WM_APP_LOADED`（网址查询那条路）分开：那条还要切标签，这条只管收尾。
 const WM_APP_LAUNCHED: u32 = WM_APP + 30;
+
+/// 在线升级：后台查版本完成（结果放在 `UPDATE_RESULT`，UI 线程取走后刷新关于页）。
+const WM_APP_UPDATE_DONE: u32 = WM_APP + 31;
+/// 后台检查结果：(状态 2=已最新 / 3=有新版本 / 4=失败, latest 版本号, 提示/原因)
+static UPDATE_RESULT: std::sync::Mutex<Option<(u8, String, String)>> =
+    std::sync::Mutex::new(None);
 /// 仅测试：回报**内环第 w 个图标**中心的屏幕坐标（高 16 位 y、低 16 位 x）。
 /// 外环有 `WM_APP_CHIPPOS`，内环一直没有 —— 自动化点图标只能靠估半径，
 /// 估错就点到空白处（点了没反应，还以为是功能坏了）。
@@ -960,6 +966,18 @@ struct State {
     /// 引导是否已看过：首启只自动播一次（ini `guide_seen` 持久化）
     guide_seen: bool,
 
+    // ── 在线升级（v1：只查版本）──
+    /// 启动时静默检查更新（ini `update_auto`，默认开）
+    update_auto: bool,
+    /// 上次检查的 unix 秒（ini `update_last_check`）；自动检查 ≥6h 才再查
+    update_last_check: f64,
+    /// 检查态：0 空闲 / 1 检查中 / 2 已最新 / 3 有新版本 / 4 失败
+    update_st: u8,
+    /// latest release 的版本号（去掉 v）
+    update_latest: String,
+    /// 失败原因 / 提示文案（给人看）
+    update_msg: String,
+
     // ── 拖入引导（onboarding）四步阶梯（用户 2026-10-14 定稿）──
     // ①② 由「**真的做了那个动作**」置位 → 槽位是 self-clearing 的，不需要任何"已读"状态；
     // ③④ 由「播过一次」置位（本来就没有对应动作可等）。
@@ -1158,6 +1176,12 @@ impl State {
             autostart: true,
             guide_step: -1,
             guide_seen: false,
+            // 在线升级：默认启动静默检查（只查不装）；last_check=0 → 首次启动必查
+            update_auto: true,
+            update_last_check: 0.0,
+            update_st: 0,
+            update_latest: String::new(),
+            update_msg: String::new(),
             onb_drag: false,
             onb_customized: false,
             onb_move: false,
@@ -7352,6 +7376,10 @@ unsafe fn read_persistent(st: &mut State) {
                 st.onb_edit = v != "0";
             } else if let Some(v) = get("guide_seen=") {
                 st.guide_seen = v != "0";
+            } else if let Some(v) = get("update_auto=") {
+                st.update_auto = v != "0";
+            } else if let Some(v) = get("update_last_check=") {
+                st.update_last_check = v.parse::<f64>().unwrap_or(0.0);
             }
         }
     }
@@ -11761,6 +11789,18 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
             finish_loading(st);
             LRESULT(0)
         }
+        WM_APP_UPDATE_DONE => {
+            // 后台查完版本 → 取结果刷关于页（异步改 State 后必须 kick_setup_frame）
+            let st = state_of(hwnd);
+            let got = UPDATE_RESULT.lock().ok().and_then(|mut q| q.take());
+            if let Some((s, latest, msg)) = got {
+                st.update_st = s;
+                st.update_latest = latest;
+                st.update_msg = msg;
+            }
+            unsafe { kick_setup_frame(st) };
+            LRESULT(0)
+        }
         WM_APP_LOADED => {
             let st = state_of(hwnd);
             // `loading` 为空 = 用户中途按了 Esc / 菜单已收起 → 整件事作废
@@ -12174,6 +12214,8 @@ enum Ctl {
     ExcPlus(u8),          // 当前生效卡片的「＋」= 选一个 exe 加进去
     // ── 交互页：名字右边的「?」→ 悬停出 tooltip ──
     Tip(u8),              // 1 常驻 2 监听 3 全屏放行 4 黑名单 5 白名单
+    /// 关于页「检查更新」按钮
+    UpdateCheck,
 }
 
 // ══ 交互页几何（绘制与命中共用，别写第二份）══
@@ -13502,6 +13544,25 @@ fn about_hotkeys(st: &State) -> String {
     }
 }
 
+/// 关于页「检查更新」按钮矩形（绘制与命中共用同一份，别写两处）。
+fn s_update_btn_rect() -> RECT {
+    let y = ACT_TOP_Y + ACT_LABEL_H + ACT_GAP;
+    RECT { left: S_X1 - 132, top: y + 5, right: S_X1, bottom: y + 23 }
+}
+
+/// 关于页「运行信息」里那行更新状态文案。
+fn update_status_text(st: &State) -> String {
+    match st.update_st {
+        1 => "检查中…".to_string(),
+        2 => format!("已是最新（v{}）", cur_version()),
+        3 => format!("发现新版本 v{} · 点右上角「更新」", st.update_latest),
+        4 => format!("检查失败：{}", st.update_msg),
+        5 => format!("新版本 v{} 已下载并校验 · 点右上角「重启并更新」", st.update_latest),
+        6 => "下载中…（校验 SHA256 后提示重启）".to_string(),
+        _ => format!("未检查（当前 v{}）", cur_version()),
+    }
+}
+
 unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     let y = ACT_TOP_Y;
     g_text(dc, "关于", RECT { left: S_X0, top: y, right: S_X1, bottom: y + ACT_LABEL_H },
@@ -13526,8 +13587,28 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     g_rrect(dc, vr, 9, mixc(pal.paper, pal.ink, 0.07), Some(pal.edge), 2);
     g_text(dc, &ver, vr, mixc(pal.paper, pal.ink, 0.55), st.sf_small, true);
 
+    // 「检查更新」按钮（右对齐，与版本胶囊同一行）
+    let ub = s_update_btn_rect();
+    let (ulabel, ufill) = match st.update_st {
+        1 => ("检查中…".to_string(), mixc(pal.paper, pal.ink, 0.04)),
+        2 => ("已是最新".to_string(), mixc(pal.paper, pal.ink, 0.04)),
+        3 => ("更新".to_string(), mixc(pal.paper, pal.ink, 0.14)),
+        4 => ("重试".to_string(), mixc(pal.paper, pal.ink, 0.04)),
+        5 => ("重启并更新".to_string(), mixc(pal.paper, pal.ink, 0.14)),
+        6 => (
+            format!(
+                "下载中 {}%",
+                UPDATE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed)
+            ),
+            mixc(pal.paper, pal.ink, 0.04),
+        ),
+        _ => ("检查更新".to_string(), mixc(pal.paper, pal.ink, 0.06)),
+    };
+    g_rrect(dc, ub, 9, ufill, Some(pal.edge), 2);
+    g_text(dc, &ulabel, ub, pal.ink, st.sf_small, true);
+
     cy += 32;
-    g_text(dc, "常驻后台，按住中键呼出；图标绕成一圈，指到就用",
+    g_text(dc, "常驻后台，一键呼出；图标绕成一圈，指到就用",
         RECT { left: tx, top: cy, right: S_X1, bottom: cy + 20 },
         mixc(pal.paper, pal.ink, 0.55), st.sf_small, false);
     cy += 26;
@@ -13551,6 +13632,7 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     let info = [
         format!("单文件 {} KB · 无外部依赖 · 空闲内存约 1 MB", sz / 1024),
         format!("已收录 {} 个应用 · 共 {} 条外环条目", st.apps.len(), items),
+        format!("更新：{}", update_status_text(st)),
         format!("配置：{}（每次改动自动备份为 .bak）", st.ini_path),
     ];
     s_about_section(st, dc, pal, &mut cy, "运行信息", &info);
@@ -13683,6 +13765,12 @@ fn s_hit(st: &State, x: i32, y: i32) -> Ctl {
                     }
                     _ => Ctl::AddItem(row.ai),
                 };
+            }
+        }
+        3 => {
+            // 关于页：「检查更新」按钮
+            if in_rect(s_update_btn_rect(), x, y) {
+                return Ctl::UpdateCheck;
             }
         }
         _ => {}
@@ -13864,6 +13952,12 @@ unsafe fn s_click(st: &mut State, hwnd: HWND, x: i32, y: i32) {
             st.onb_edit = false;
             unsafe { save_settings(st) };
         }
+        Ctl::UpdateCheck => match st.update_st {
+            3 => start_download(st),  // 发现新版 → 下载+校验
+            5 => apply_update(st),    // 已就绪 → 重启并更新
+            1 | 6 => {}               // 检查/下载中：忽略
+            _ => start_update_check(st, true),
+        },
         Ctl::Tip(_) => {} // 「?」只用于悬停出 tooltip，点了不做事
         Ctl::AppHead(ai) => {
             st.set_expanded = if st.set_expanded == ai { usize::MAX } else { ai };
@@ -14309,6 +14403,8 @@ unsafe fn save_settings(st: &State) {
     out.push_str(&format!("key_rhold={}\r\n", b(st.key_rhold)));
     out.push_str(&format!("autostart={}\r\n", b(st.autostart)));
     out.push_str(&format!("guide_seen={}\r\n", b(st.guide_seen)));
+    out.push_str(&format!("update_auto={}\r\n", b(st.update_auto)));
+    out.push_str(&format!("update_last_check={}\r\n", st.update_last_check as i64));
     out.push_str(&format!("onb_drag={}\r\n", b(st.onb_drag)));
     out.push_str(&format!("onb_move={}\r\n", b(st.onb_move)));
     out.push_str(&format!("onb_edit={}\r\n", b(st.onb_edit)));
@@ -14826,6 +14922,505 @@ unsafe fn settings_dump(dir: &str, st: &mut State) {
     st.set_expanded = usize::MAX;
 }
 
+// ───────────────────── 在线升级（v1：查版本） ─────────────────────
+
+/// GitHub 最新 release API（Public 仓库可匿名读）。可用 `PIGO_UPDATE_URL` 覆盖以便本地演练。
+const UPDATE_API: &str = "https://api.github.com/repos/lifeFxxker/pigo/releases/latest";
+/// 自动检查的最小间隔（秒）：防 GitHub 匿名 API 限流（60 次/时/IP）。
+const UPDATE_MIN_INTERVAL: f64 = 6.0 * 3600.0;
+
+/// 当前版本（Cargo.toml 的 version）。
+fn cur_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// 把版本串拆成数字段（`v1.2.3` / `1.2.3-beta` → [1,2,3]；每段取前导数字，缺省 0）。
+fn ver_parts(v: &str) -> Vec<u64> {
+    v.trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|s| {
+            s.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// `a > b`（逐段数字比，长度不齐按 0 补）。
+fn version_gt(a: &str, b: &str) -> bool {
+    let (pa, pb) = (ver_parts(a), ver_parts(b));
+    for i in 0..pa.len().max(pb.len()) {
+        let x = *pa.get(i).unwrap_or(&0);
+        let y = *pb.get(i).unwrap_or(&0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// 极简 JSON 取字符串字段（只用于 release 响应里的 `tag_name` 等**不含转义引号**的字段）。
+fn json_str_field(json: &str, key: &str) -> Option<String> {
+    let pat = format!("\"{}\"", key);
+    let i = json.find(&pat)?;
+    let rest = &json[i + pat.len()..];
+    let rest = rest.trim_start().strip_prefix(':')?;
+    let rest = rest.trim_start().strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// HTTPS GET（WinINet，走系统代理/TLS）→ (HTTP 状态码, 原始字节)。
+/// `on_read(已读字节, 总字节)` 每读一块回调一次（总字节未知时为 0）—— 下载进度用。
+fn http_get_raw_cb(
+    url: &str,
+    mut on_read: Option<&mut dyn FnMut(u64, u64)>,
+) -> Result<(u32, Vec<u8>), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Networking::WinInet::{
+        HttpQueryInfoW, InternetCloseHandle, InternetOpenUrlW, InternetOpenW, InternetReadFile,
+        HTTP_QUERY_CONTENT_LENGTH, HTTP_QUERY_FLAG_NUMBER, HTTP_QUERY_STATUS_CODE,
+        INTERNET_FLAG_NO_CACHE_WRITE, INTERNET_FLAG_RELOAD, INTERNET_OPEN_TYPE_PRECONFIG,
+    };
+    let agent = wide("pigo-updater");
+    let target = wide(url);
+    unsafe {
+        let h = InternetOpenW(
+            PCWSTR(agent.as_ptr()),
+            INTERNET_OPEN_TYPE_PRECONFIG.0,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            0,
+        );
+        if h.is_null() {
+            return Err("InternetOpen 失败".into());
+        }
+        let flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
+        let req = InternetOpenUrlW(h, PCWSTR(target.as_ptr()), None, flags, 0);
+        if req.is_null() {
+            let _ = InternetCloseHandle(h);
+            return Err("连接失败（网络/DNS/被墙）".into());
+        }
+        // 状态码
+        let mut status: u32 = 0;
+        let mut slen = std::mem::size_of::<u32>() as u32;
+        let _ = HttpQueryInfoW(
+            req,
+            HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
+            Some(&mut status as *mut _ as *mut core::ffi::c_void),
+            &mut slen,
+            None,
+        );
+        // Content-Length（进度分母；可能没有）
+        let mut total: u32 = 0;
+        let mut tlen = std::mem::size_of::<u32>() as u32;
+        let _ = HttpQueryInfoW(
+            req,
+            HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER,
+            Some(&mut total as *mut _ as *mut core::ffi::c_void),
+            &mut tlen,
+            None,
+        );
+        // 响应体
+        let mut body: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 16384];
+        loop {
+            let mut read: u32 = 0;
+            if InternetReadFile(
+                req,
+                buf.as_mut_ptr() as *mut core::ffi::c_void,
+                buf.len() as u32,
+                &mut read,
+            )
+            .is_err()
+            {
+                break;
+            }
+            if read == 0 {
+                break;
+            }
+            body.extend_from_slice(&buf[..read as usize]);
+            if let Some(cb) = on_read.as_mut() {
+                cb(body.len() as u64, total as u64);
+            }
+        }
+        let _ = InternetCloseHandle(req);
+        let _ = InternetCloseHandle(h);
+        Ok((status, body))
+    }
+}
+
+fn http_get_raw(url: &str) -> Result<(u32, Vec<u8>), String> {
+    http_get_raw_cb(url, None)
+}
+
+/// 取文本响应（release API / SHA256SUMS 用）。
+fn http_get(url: &str) -> Result<(u32, String), String> {
+    http_get_raw(url).map(|(s, b)| (s, String::from_utf8_lossy(&b).into_owned()))
+}
+
+enum UpdateOutcome {
+    /// 已是最新（带上 latest 便于显示）
+    UpToDate { latest: String },
+    /// 有新版本（带 asset 下载地址）
+    Available {
+        latest: String,
+        exe_url: String,
+        sums_url: String,
+    },
+    /// 检查失败（原因是给人看的）
+    Failed(String),
+}
+
+/// 下载进度 0..=100（UI 在 setup tick 里读，避免每块都投消息）。
+static UPDATE_PROGRESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// 检查成功时记下的 asset 下载地址（供随后「更新」按钮用）。
+static UPDATE_EXE_URL: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+static UPDATE_SUMS_URL: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// 校验通过的新 exe 临时路径（供「重启并更新」用）。
+static UPDATE_NEW_PATH: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn update_api_url() -> String {
+    std::env::var("PIGO_UPDATE_URL").unwrap_or_else(|_| UPDATE_API.to_string())
+}
+
+/// 从 release JSON 的 assets 数组里找名为 `want` 的资产，返回 browser_download_url。
+/// ⚠️ 只做朴素的花括号配对（GitHub asset 对象的字符串值里不含 `{}[]`）。
+fn find_asset_url(json: &str, want: &str) -> Option<String> {
+    let aidx = json.find("\"assets\"")?;
+    let arr = aidx + json[aidx..].find('[')?;
+    let bytes = json.as_bytes();
+    let mut i = arr + 1;
+    let mut depth = 0i32;
+    let mut obj_start = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                if depth == 0 {
+                    obj_start = i;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let obj = &json[obj_start..=i];
+                    if json_str_field(obj, "name").as_deref() == Some(want) {
+                        return json_str_field(obj, "browser_download_url");
+                    }
+                }
+            }
+            b']' if depth == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// 从 SHA256SUMS（`<hex>  <file>` 每行）里取 `file` 的 hash（小写）。`*file` = 二进制模式。
+fn parse_sums(text: &str, file: &str) -> Option<String> {
+    for line in text.lines() {
+        let mut it = line.split_whitespace();
+        let h = it.next()?;
+        let f = it.next().unwrap_or("").trim_start_matches('*');
+        if h.len() == 64 && f.eq_ignore_ascii_case(file) {
+            return Some(h.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+/// SHA-256（BCrypt/CNG，不引入哈希 crate）→ 小写 hex。
+fn sha256_hex(data: &[u8]) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Security::Cryptography::{
+        BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
+        BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE,
+        BCRYPT_SHA256_ALGORITHM,
+    };
+    unsafe {
+        let mut alg = BCRYPT_ALG_HANDLE::default();
+        if BCryptOpenAlgorithmProvider(
+            &mut alg,
+            BCRYPT_SHA256_ALGORITHM,
+            PCWSTR::null(),
+            Default::default(),
+        )
+        .0
+            < 0
+        {
+            return None;
+        }
+        let mut h = BCRYPT_HASH_HANDLE::default();
+        if BCryptCreateHash(alg, &mut h, None, None, 0).0 < 0 {
+            let _ = BCryptCloseAlgorithmProvider(alg, 0);
+            return None;
+        }
+        let mut out = [0u8; 32];
+        let ok = BCryptHashData(h, data, 0).0 >= 0 && BCryptFinishHash(h, &mut out, 0).0 >= 0;
+        let _ = BCryptDestroyHash(h);
+        let _ = BCryptCloseAlgorithmProvider(alg, 0);
+        if ok {
+            Some(out.iter().map(|b| format!("{:02x}", b)).collect())
+        } else {
+            None
+        }
+    }
+}
+
+/// 同步检查更新（网络阻塞，**不要**在 UI 线程直接调；UI 走后台线程）。
+fn check_update_sync() -> UpdateOutcome {
+    match http_get(&update_api_url()) {
+        Ok((status, body)) => {
+            if status == 403 || status == 429 {
+                return UpdateOutcome::Failed(format!("请求受限（HTTP {status}）"));
+            }
+            if status != 200 {
+                return UpdateOutcome::Failed(format!("HTTP {status}"));
+            }
+            match json_str_field(&body, "tag_name") {
+                Some(tag) => {
+                    let latest = tag.trim_start_matches('v').to_string();
+                    if version_gt(&latest, cur_version()) {
+                        match (
+                            find_asset_url(&body, "Pigo.exe"),
+                            find_asset_url(&body, "SHA256SUMS"),
+                        ) {
+                            (Some(exe_url), Some(sums_url)) => UpdateOutcome::Available {
+                                latest,
+                                exe_url,
+                                sums_url,
+                            },
+                            _ => UpdateOutcome::Failed(
+                                "release 里缺 Pigo.exe 或 SHA256SUMS asset".into(),
+                            ),
+                        }
+                    } else {
+                        UpdateOutcome::UpToDate { latest }
+                    }
+                }
+                None => UpdateOutcome::Failed("响应里没有 tag_name".into()),
+            }
+        }
+        Err(e) => UpdateOutcome::Failed(e),
+    }
+}
+
+/// unix 秒（用于 `update_last_check`；注意 `now_s()` 是进程内相对时间，不是这个）。
+fn unix_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+/// 触发一次检查：置「检查中」、起后台线程（联网 + 解析），完成后 post `WM_APP_UPDATE_DONE`。
+/// `manual=false` 先睡 3s 避开启动高峰。**绝不在 UI 线程同步联网。**
+fn start_update_check(st: &mut State, manual: bool) {
+    if st.update_st == 1 {
+        return; // 已有检查在跑
+    }
+    st.update_st = 1;
+    st.update_msg.clear();
+    st.update_last_check = unix_now();
+    unsafe { save_settings(st) };
+    std::thread::spawn(move || {
+        if !manual {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+        let (s, latest, msg) = match check_update_sync() {
+            UpdateOutcome::UpToDate { latest } => (2u8, latest, "已是最新".to_string()),
+            UpdateOutcome::Available {
+                latest,
+                exe_url,
+                sums_url,
+            } => {
+                if let Ok(mut q) = UPDATE_EXE_URL.lock() {
+                    *q = exe_url;
+                }
+                if let Ok(mut q) = UPDATE_SUMS_URL.lock() {
+                    *q = sums_url;
+                }
+                (3u8, latest, String::new())
+            }
+            UpdateOutcome::Failed(e) => (4u8, String::new(), e),
+        };
+        if let Ok(mut q) = UPDATE_RESULT.lock() {
+            *q = Some((s, latest, msg));
+        }
+        unsafe { post(WM_APP_UPDATE_DONE, 0, 0) };
+    });
+}
+
+/// 下载 + SHA256 校验 → `<exe 同目录>\.pigo-update.new`；完成后 post 状态（5 就绪 / 4 失败）。
+/// 下载 exe + 取 SHA256SUMS + 校验 + 写入 `dest`（同步，阻塞）。供后台线程与诊断 CLI 共用。
+fn download_and_verify(exe_url: &str, sums_url: &str, dest: &str) -> Result<(), String> {
+    let (code, bytes) = http_get_raw_cb(
+        exe_url,
+        Some(&mut |done, total| {
+            let p = if total > 0 {
+                ((done * 100 / total.max(1)) as u32).min(100)
+            } else {
+                0
+            };
+            UPDATE_PROGRESS.store(p, std::sync::atomic::Ordering::Relaxed);
+        }),
+    )
+    .map_err(|e| format!("下载失败：{e}"))?;
+    if code != 200 {
+        return Err(format!("下载 HTTP {code}"));
+    }
+    UPDATE_PROGRESS.store(100, std::sync::atomic::Ordering::Relaxed);
+    let (s_code, sums) = http_get(sums_url).map_err(|e| format!("取校验文件失败：{e}"))?;
+    if s_code != 200 {
+        return Err(format!("校验文件 HTTP {s_code}"));
+    }
+    let want = parse_sums(&sums, "Pigo.exe").ok_or("SHA256SUMS 里没有 Pigo.exe")?;
+    let got = sha256_hex(&bytes).ok_or("SHA256 计算失败")?;
+    if got != want {
+        return Err(format!("校验不符（期望 {want}，实际 {got}）"));
+    }
+    std::fs::write(dest, &bytes).map_err(|e| format!("写入失败：{e}"))?;
+    Ok(())
+}
+
+fn start_download(st: &mut State) {
+    if st.update_st == 1 || st.update_st == 6 {
+        return; // 正在检查 / 下载
+    }
+    let exe_url = UPDATE_EXE_URL.lock().map(|s| s.clone()).unwrap_or_default();
+    let sums_url = UPDATE_SUMS_URL.lock().map(|s| s.clone()).unwrap_or_default();
+    if exe_url.is_empty() || sums_url.is_empty() {
+        st.update_st = 4;
+        st.update_msg = "缺少下载地址（请先检查更新）".into();
+        return;
+    }
+    st.update_st = 6;
+    st.update_msg.clear();
+    UPDATE_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
+    let new_path = format!("{}\\.pigo-update.new", exe_dir());
+    unsafe { save_settings(st) };
+    std::thread::spawn(move || {
+        let result = download_and_verify(&exe_url, &sums_url, &new_path);
+        let (s, msg) = match result {
+            Ok(()) => (5u8, String::new()),
+            Err(e) => (4u8, e),
+        };
+        if s == 5 {
+            if let Ok(mut q) = UPDATE_NEW_PATH.lock() {
+                *q = new_path;
+            }
+        }
+        if let Ok(mut q) = UPDATE_RESULT.lock() {
+            *q = Some((s, String::new(), msg));
+        }
+        unsafe { post(WM_APP_UPDATE_DONE, 0, 0) };
+    });
+}
+
+/// 应用更新：复制自身为 updater，带参启动，然后退出当前进程。
+/// 不覆盖运行中的 exe（被锁），也不和新实例抢单实例互斥 —— 交给 updater。
+fn apply_update(st: &mut State) {
+    let new_path = UPDATE_NEW_PATH.lock().map(|s| s.clone()).unwrap_or_default();
+    if new_path.is_empty() || !std::path::Path::new(&new_path).exists() {
+        st.update_st = 4;
+        st.update_msg = "找不到已下载的新版本，请重新检查".into();
+        return;
+    }
+    let exe = exe_path();
+    let updater = format!("{}\\.pigo-updater.exe", exe_dir());
+    if std::fs::copy(&exe, &updater).is_err() {
+        st.update_st = 4;
+        st.update_msg = "无法创建 updater（目录不可写？便携版请放到用户目录）".into();
+        return;
+    }
+    let args = format!(
+        "\"{}\" --apply-update \"{}\" \"{}\" {}",
+        updater,
+        new_path,
+        exe,
+        std::process::id()
+    );
+    unsafe {
+        use windows::core::{PCWSTR, PWSTR};
+        use windows::Win32::Foundation::BOOL;
+        use windows::Win32::System::Threading::{
+            CreateProcessW, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOW,
+        };
+        let mut cmd: Vec<u16> = args.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut si = STARTUPINFOW::default();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi = PROCESS_INFORMATION::default();
+        let ok = CreateProcessW(
+            PCWSTR::null(),
+            PWSTR(cmd.as_mut_ptr()),
+            None,
+            None,
+            BOOL(0),
+            PROCESS_CREATION_FLAGS(0),
+            None,
+            PCWSTR::null(),
+            &si,
+            &mut pi,
+        )
+        .is_ok();
+        if ok {
+            std::process::exit(0); // 交棒给 updater；退出即释放 exe 锁 + 单实例互斥
+        }
+    }
+    st.update_st = 4;
+    st.update_msg = "启动更新程序失败".into();
+}
+
+/// updater 进程入口（`--apply-update`）：等旧进程退出 → 替换目标 exe → 启动新版。
+unsafe fn updater_apply(new_path: &str, target: &str, parent_pid: u32) {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{CloseHandle, BOOL};
+    use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING};
+    use windows::Win32::System::Threading::{
+        CreateProcessW, OpenProcess, WaitForSingleObject, PROCESS_CREATION_FLAGS,
+        PROCESS_INFORMATION, PROCESS_SYNCHRONIZE, STARTUPINFOW,
+    };
+    if let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, parent_pid) {
+        let _ = WaitForSingleObject(h, 30000);
+        let _ = CloseHandle(h);
+    }
+    let wn = wide(new_path);
+    let wt = wide(target);
+    // 等不到 / 替换失败也照常启动目标（最坏就是旧版，不把人晾着）
+    let _ = MoveFileExW(
+        PCWSTR(wn.as_ptr()),
+        PCWSTR(wt.as_ptr()),
+        MOVEFILE_REPLACE_EXISTING,
+    );
+    let mut si = STARTUPINFOW::default();
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut pi = PROCESS_INFORMATION::default();
+    let mut cmd: Vec<u16> = wt.clone();
+    let _ = CreateProcessW(
+        PCWSTR(wt.as_ptr()),
+        PWSTR(cmd.as_mut_ptr()),
+        None,
+        None,
+        BOOL(0),
+        PROCESS_CREATION_FLAGS(0),
+        None,
+        PCWSTR::null(),
+        &si,
+        &mut pi,
+    );
+    if !pi.hProcess.is_invalid() {
+        let _ = CloseHandle(pi.hProcess);
+    }
+    if !pi.hThread.is_invalid() {
+        let _ = CloseHandle(pi.hThread);
+    }
+}
+
 // ───────────────────── 入口 ─────────────────────
 
 fn main() {
@@ -14834,6 +15429,77 @@ fn main() {
     if args.len() >= 2 && args[1] == "--quit" {
         unsafe { kill_other_instances() };
         println!("[*] 已发送退出指令");
+        return;
+    }
+    // updater 模式：必须是**最早**的分支 —— 不抢单实例互斥、不建窗口。
+    if args.len() >= 5 && args[1] == "--apply-update" {
+        let pid = args[4].parse::<u32>().unwrap_or(0);
+        unsafe { updater_apply(&args[2], &args[3], pid) };
+        return;
+    }
+    if args.len() >= 3 && args[1] == "--sha256" {
+        // 诊断：算文件 SHA256（用 CNG），与 sha256sum 交叉验证用。
+        match std::fs::read(&args[2]) {
+            Ok(b) => match sha256_hex(&b) {
+                Some(h) => println!("{h}"),
+                None => {
+                    eprintln!("sha256 计算失败");
+                    std::process::exit(2);
+                }
+            },
+            Err(e) => {
+                eprintln!("读取失败: {e}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+    if args.len() >= 2 && args[1] == "--check-update" {
+        // 诊断/测试：同步查一次更新并打印结果（不启动 UI）。供本地演练与脚本用。
+        match check_update_sync() {
+            UpdateOutcome::Available {
+                latest,
+                exe_url,
+                sums_url,
+            } => {
+                println!("[update] 有新版本: v{latest}（当前 v{}）", cur_version());
+                println!("         exe={exe_url}");
+                println!("         sums={sums_url}");
+            }
+            UpdateOutcome::UpToDate { latest } => {
+                println!("[update] 已是最新: v{latest}（当前 v{}）", cur_version())
+            }
+            UpdateOutcome::Failed(e) => {
+                eprintln!("[update] 检查失败: {e}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+    if args.len() >= 3 && args[1] == "--update-fetch" {
+        // 诊断：检查 + 下载 + 校验（同步），把新 exe 落到 <dir>\Pigo.exe。端到端演练用。
+        let dir = args[2].clone();
+        match check_update_sync() {
+            UpdateOutcome::Available {
+                latest,
+                exe_url,
+                sums_url,
+            } => {
+                let dest = format!("{dir}\\Pigo.exe");
+                match download_and_verify(&exe_url, &sums_url, &dest) {
+                    Ok(()) => println!("[update] 下载并校验通过 v{latest} → {dest}"),
+                    Err(e) => {
+                        eprintln!("[update] 失败: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            UpdateOutcome::UpToDate { latest } => println!("[update] 已最新 v{latest}"),
+            UpdateOutcome::Failed(e) => {
+                eprintln!("[update] 检查失败: {e}");
+                std::process::exit(2);
+            }
+        }
         return;
     }
     if args.len() >= 2 && args[1] == "--dump" {
@@ -15226,6 +15892,11 @@ fn main() {
         init_config_path(&mut st);
         load_ini(&mut st);
         read_persistent(&mut st);
+        // 更新残留清理：updater 用完的副本 / 已应用的新版本临时文件
+        // （新 pigo 由 updater 拉起时顺手删；updater 可能还没完全退出，删不掉就下次再来）
+        for f in [".pigo-updater.exe", ".pigo-update.new"] {
+            let _ = std::fs::remove_file(format!("{}\\{}", exe_dir(), f));
+        }
         // 开机自启：**ini 是唯一真相**（缺省 = 开）→ 启动时把注册表同步过去，
         // 「默认勾选」才成立；用户在设置页主动关才会写 0 并把注册表项删掉。
         // ⚠️ 用 `autostart_sync`（只补差集）而不是 `autostart_set`：后者会把值
@@ -15290,6 +15961,12 @@ fn main() {
         SetWindowLongPtrW(rhwnd, GWLP_USERDATA, p as isize);
         MAIN_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
         RING_HWND.store(rhwnd.0 as isize, Ordering::SeqCst);
+
+        // 在线升级：启动静默检查（**只查不装**）。首次启动必查，之后 ≥6h 一次（防限流）。
+        // 后台线程 sleep 3s 再联网，避免和启动抢资源；结果 post 回 UI 刷关于页。
+        if st.update_auto && unix_now() - st.update_last_check >= UPDATE_MIN_INTERVAL {
+            start_update_check(&mut st, false);
+        }
 
         // 「例外名单」常驻刷新定时器：在 MAIN_HWND 上只 SetTimer 一次、永不 KillTimer，
         // 独立于渲染帧定时器（帧定时器在菜单关 / 静止时会停）。
@@ -15364,7 +16041,7 @@ fn main() {
             st.hide_at = now_s() + REVEAL_SECS;
         }
 
-        println!("[*] pigo 已就绪：中键呼出 · 托盘菜单 / Ctrl+Alt+R 开关监听");
+        println!("[*] pigo 已就绪：{} · 托盘菜单 / Ctrl+Alt+R 开关监听", about_hotkeys(&st));
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
