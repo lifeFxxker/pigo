@@ -1,94 +1,103 @@
-# Pigo
+# pigo
 
-<p align="center">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows&logoColor=white" alt="Platform">
-  <img src="https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+<p align="left">
+  <a href="https://github.com/lifeFxxker/pigo/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pigo?color=black&label=release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
+  <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
+  <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
 </p>
 
-**pigo** is a radial (pie-menu) app launcher for Windows. Summon a cursor-centered dial with a mouse gesture or hotkey, pin your apps to the inner ring, and peek live window previews by hovering the outer ring — all in a single native executable with no runtime dependencies.
+**[English](README.md) · [简体中文](README.zh-CN.md)**
 
-**中文简介：** pigo 是一个 Windows 平台的光标居中双环启动器。按住鼠标中键（或侧键）在光标处弹出轮盘，内环固定常用应用、外环展开该应用当前打开的窗口；悬停即显示实时窗口预览（基于 DWM 缩略图，最小化窗口也有画面）。原生 Win32 实现，单文件 exe，零运行时依赖。
+A radial app launcher for Windows. Summon a cursor-centered dial with the middle mouse button, pin your frequently used apps to the inner ring, and hover an app to fan out its open windows on the outer ring — with a live window preview. One native executable, no runtime, no installer.
+
+---
 
 ## Screenshots
 
-| Inner ring (主盘) | Outer chips (外环胶囊) |
-| --- | --- |
-| ![ring](design/preview-ring.png) | ![chips](design/preview-chips.png) |
+| Inner ring | Outer ring — an app's open windows |
+| :---: | :---: |
+| ![Inner ring](design/preview-ring.png) | ![Outer ring](design/preview-chips.png) |
+| A running app gets a dot under its icon. | Hovering an app fans its windows out beside it. |
 
-| Live preview (实时预览) | App management (应用管理) |
-| --- | --- |
-| ![live](design/preview-live.png) | ![apps](design/preview-apps.png) |
+| Live window preview | Settings |
+| :---: | :---: |
+| ![Live preview](design/preview-live.png) | ![Settings](design/preview-apps.png) |
+| Hover a window chip for a live DWM thumbnail. | Flat, paper-style preferences. |
 
 ## Features
 
-- **Cursor-centered dual ring** — The inner ring holds your pinned apps; the outer ring expands that app's open windows, laid out at the default spacing right next to the corresponding inner icon. Hit-testing and drawing share one layout routine, so what you see is exactly what you click.
-- **Drag-to-pin** — Drop a `.lnk`, folder, or file onto an inner tile to pin it. Reorder, rename, and remove are all supported.
-- **Live running state** — A running app shows a dot under its inner icon. Hover an app that has windows and the outer ring lists them; hovering a window pops a **live preview** (`DwmRegisterThumbnail`, including minimized windows).
-- **Liquid-glass material** — A very subtle glass effect applied to the dial only; the settings page stays flat paper for readability.
+- **Cursor-centered dial** — Appears exactly where your pointer is, so you never travel to a corner of the screen.
+- **Two-level layout** — The inner ring holds pinned apps; the outer ring expands the hovered app's windows as capsules grouped next to that app, not spread across the whole circle.
+- **Drag to organize** — Drop a shortcut, `.exe`, folder, or file onto the inner ring to pin it. Reorder, rename, and remove from the same view.
+- **Live window previews** — Hover a window capsule to see that window in real time (`DwmRegisterThumbnail`), including minimized windows. Video and animation stay live — it is not a screenshot.
+- **Running indicators** — Apps with an open window show a small dot beneath their icon.
+- **Liquid-glass material** — A subtle glass finish on the dial only; the settings page stays flat paper for readability.
 - **Built-in actions** — e.g. `@act:start` opens the Windows Start menu directly.
-- **Autostart / resident / custom invoke** — Run at login and stay in the tray. Invocation can be middle button, side button, long-press right button, or a custom key combo (e.g. `Ctrl+W`).
-- **Single file, zero dependencies** — The build output is one `Pigo.exe`; no .NET or other runtime required.
+- **Flexible invocation** — Middle mouse button, a side button, long-press right button, or a recorded key combo such as `Ctrl+W`.
+- **Resident & autostart** — Optionally start at login and live in the tray.
+- **Single file, zero dependencies** — The build output is one `Pigo.exe` (≈700 KB); no .NET or other runtime is required.
 
 ## Installation
 
-### Download a prebuilt package
+### Download
 
-Grab `pigo-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pigo/releases) page, unzip, and run `Pigo.exe`.
+Grab the latest `pigo-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pigo/releases) page, unzip it anywhere, and run `Pigo.exe`.
 
-> If no Release is published yet, build it locally — see below.
+> If no release is published yet, build it locally (below).
 
 ### Build from source
 
 **Prerequisites**
 
 - Windows 10 / 11, **x64**
-- Rust (edition 2021) via [rustup](https://rustup.rs/)
+- [Rust](https://rustup.rs/) (edition 2021)
 - MSVC toolchain — Visual Studio Build Tools, or `winget install Microsoft.VisualStudio.BuildTools`
-- Windows SDK (used to embed the exe icon; if absent, the icon step is skipped and the build still succeeds)
+- Windows SDK — used to embed the exe icon; if it is missing the icon step is skipped and the build still succeeds
 
 ```bash
 cargo build --release
-# output: target/release/Pigo.exe
+# -> target/release/Pigo.exe
 ```
 
-> ⚠️ Keep `lto = "thin"` in `Cargo.toml`. Do **not** switch it to `"true"` (fat LTO): the current rustc miscompiles this project's `unsafe` FFI code, causing an immediate crash on launch (`0xC0000409`).
+> **Keep `lto = "thin"` in `Cargo.toml`.** Do not switch to fat LTO (`"true"`): the current toolchain miscompiles this project's `unsafe` FFI and the app crashes on launch (`0xC0000409`).
 
-Package into a single-file zip (with a usage note):
+Package a single-file zip:
 
 ```bash
 python package.py
-# output: dist/Pigo.exe  and  dist/pigo-v1.0.0-win64.zip
+# -> dist/Pigo.exe  and  dist/pigo-v1.0.0-win64.zip
 ```
 
 ## Usage
 
-- **Invoke** — By default, hold the **middle mouse button** (or a side button) to pop the dial at the cursor; release to execute, `Esc` / any other key cancels. In settings you can switch to long-press right button or record a custom combo such as `Ctrl+W`.
-- **Pin an app** — Drag a `.lnk`, folder, or file onto an inner tile. Its windows are grouped onto that app's outer ring automatically.
-- **Running indicator** — A dot under an inner icon means the app is running; hovering an app that owns windows lists them on the outer ring with live previews on hover.
-- **Built-in action** — `@act:start` opens the Windows Start menu.
-- **Settings** — Open the settings page from the menu (flat paper style, not glass).
+- **Invoke** — Hold the **middle mouse button** (or a side button) to pop the dial at the cursor. Release to launch the highlighted app; press `Esc` or any other key to cancel. Switch to long-press right button or a custom combo in Settings.
+- **Pin an app** — Drag a shortcut, `.exe`, folder, or file onto an inner tile.
+- **Add a window** — Drag a window onto the dial to group it under its app; it then appears on that app's outer ring.
+- **Preview** — Hover an app to fan out its windows; hover a window capsule for a live preview.
+- **Settings** — Open from the tray icon (right-click → 设置…). The settings page is flat paper, deliberately not glass.
 
 ## Configuration
 
-pigo stores its config at `%APPDATA%\pigo\settings.ini`, created automatically on first run. The app list, invoke method, and appearance are all edited from the in-app settings page — manual editing is rarely needed.
+Configuration lives in `%APPDATA%\pigo\settings.ini`, created on first run and normally edited through the in-app Settings page. Logs are written to `%LOCALAPPDATA%\pigo\logs\`.
+
+## How it works
+
+- **Pure Win32 via `windows-rs`** — No UI framework. A self-contained software renderer keeps the binary small, the startup fast, and the footprint runtime-free.
+- **Layered window** — The dial is presented through `UpdateLayeredWindow` with premultiplied alpha. The glass material samples the desktop behind the dial, which is why it is refreshed on every invocation.
+- **Previews are DWM thumbnails** — Because a layered window cannot be a DWM thumbnail source, previews are rendered in a separate plain top-level window using `DwmRegisterThumbnail`. The result is a live picture rather than a static capture, and minimized windows still show their last frame.
+- **One layout for drawing and hit-testing** — The inner ring and outer capsules share a single layout routine, so what you see is exactly what you click.
 
 ## Project layout
 
 ```
-src/main.rs            全部逻辑，原生 Win32 实现（自有软件渲染器）
-app.rc / app.ico       exe 版本信息与图标
-build.rs               调用 Windows SDK 的 rc.exe 嵌入图标（缺失则跳过）
-package.py             一键打包为 zip
-test_*.py              自动化 UI 测试（需先启动 Pigo.exe）
-design/preview-*.png   README 用预览图
+src/main.rs            All logic — native Win32 + a software renderer
+app.rc / app.ico       Executable version info and icon
+build.rs               Embeds the icon via the Windows SDK rc.exe (skipped if absent)
+package.py             One-step packaging into a zip
+test_*.py              Automated UI tests (launch Pigo.exe first)
+design/preview-*.png   Screenshots used by the README
 ```
-
-## Technical notes
-
-- **Pure Win32 + `windows-rs`** — No UI framework and a self-contained software renderer, which keeps the binary small (~700KB), launches fast, and carries no runtime.
-- **Live previews via DWM thumbnails** — Hover previews use `DwmRegisterThumbnail`, showing the target window's live picture (including a minimized window's snapshot) rather than a static screenshot, so video and animation stay live.
-- **Layered window for the glass** — The dial renders through `UpdateLayeredWindow` with premultiplied alpha. Because a layered (ULW) window cannot be a DWM thumbnail source, previews use a separate plain top-level window.
 
 ## License
 
