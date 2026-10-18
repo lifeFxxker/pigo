@@ -13545,9 +13545,11 @@ fn about_hotkeys(st: &State) -> String {
 }
 
 /// 关于页「检查更新」按钮矩形（绘制与命中共用同一份，别写两处）。
+/// 高度取 `ACT_CHIPS_H`（与设置页其它按钮/胶囊统一），单独一行放在标语下方。
 fn s_update_btn_rect() -> RECT {
-    let y = ACT_TOP_Y + ACT_LABEL_H + ACT_GAP;
-    RECT { left: S_X1 - 132, top: y + 5, right: S_X1, bottom: y + 23 }
+    // 标语顶 = base+32、行高 20；按钮再下移 14px → base+66
+    let top = ACT_TOP_Y + ACT_LABEL_H + ACT_GAP + 32 + 34;
+    RECT { left: S_X0, top, right: S_X0 + 168, bottom: top + ACT_CHIPS_H }
 }
 
 /// 关于页「运行信息」里那行更新状态文案。
@@ -13587,7 +13589,12 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     g_rrect(dc, vr, 9, mixc(pal.paper, pal.ink, 0.07), Some(pal.edge), 2);
     g_text(dc, &ver, vr, mixc(pal.paper, pal.ink, 0.55), st.sf_small, true);
 
-    // 「检查更新」按钮（右对齐，与版本胶囊同一行）
+    cy += 32;
+    g_text(dc, "常驻后台，一键呼出；图标绕成一圈，指到就用",
+        RECT { left: tx, top: cy, right: S_X1, bottom: cy + 20 },
+        mixc(pal.paper, pal.ink, 0.55), st.sf_small, false);
+
+    // 「检查更新」按钮：整行 chip 高度（和设置页其它按钮统一），单独一行放标语下方
     let ub = s_update_btn_rect();
     let (ulabel, ufill) = match st.update_st {
         1 => ("检查中…".to_string(), mixc(pal.paper, pal.ink, 0.04)),
@@ -13596,22 +13603,15 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
         4 => ("重试".to_string(), mixc(pal.paper, pal.ink, 0.04)),
         5 => ("重启并更新".to_string(), mixc(pal.paper, pal.ink, 0.14)),
         6 => (
-            format!(
-                "下载中 {}%",
-                UPDATE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed)
-            ),
+            format!("下载中 {}%", UPDATE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed)),
             mixc(pal.paper, pal.ink, 0.04),
         ),
         _ => ("检查更新".to_string(), mixc(pal.paper, pal.ink, 0.06)),
     };
-    g_rrect(dc, ub, 9, ufill, Some(pal.edge), 2);
+    g_rrect(dc, ub, 10, ufill, Some(pal.edge), 2);
     g_text(dc, &ulabel, ub, pal.ink, st.sf_small, true);
+    cy = ub.bottom + ACT_GAP;
 
-    cy += 32;
-    g_text(dc, "常驻后台，一键呼出；图标绕成一圈，指到就用",
-        RECT { left: tx, top: cy, right: S_X1, bottom: cy + 20 },
-        mixc(pal.paper, pal.ink, 0.55), st.sf_small, false);
-    cy += 26;
     g_line(dc, S_X0, cy, S_X1, cy, 1, mixc(pal.paper, pal.ink, 0.13));
     cy += 20;
 
