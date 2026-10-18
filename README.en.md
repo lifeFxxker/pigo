@@ -13,6 +13,12 @@ A radial app launcher for Windows. Summon a cursor-centered dial with the middle
 
 ---
 
+## Demo
+
+![Demo](design/preview-demo.gif)
+
+Hover an app to fan out its open windows; hold and drag an inner tile to reorder it (insertion, not a simple swap).
+
 ## Screenshots
 
 | Inner ring | Outer ring — an app's open windows |
