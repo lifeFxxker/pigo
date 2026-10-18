@@ -1020,10 +1020,10 @@ impl State {
         State {
             apps: Vec::new(),
             ini_path: String::new(),
-            glass_liquid: false,
+            glass_liquid: true,
             app_running: [false; MAX_APPS],
             app_hwnd: [0; MAX_APPS],
-            glass: false,
+            glass: true,
             glass_bg: Vec::new(),
             running: false,
             persistent: true,
@@ -1074,7 +1074,7 @@ impl State {
             exc: Vec::new(),
             exc_w: Vec::new(),
             exc_fs: false,
-            hover_name: true,
+            hover_name: false,
             exc_t: 0.0,
             pending_rms: Vec::new(),
             cancel_a: 0.0,
@@ -1136,7 +1136,9 @@ impl State {
 
             // 设置
             theme: 1,
-            key_middle: true,
+            // 默认只开「鼠标侧键」呼出（用户 2026-10-18 拍板）：中键在浏览器/软件里
+            // 常被用作「新标签/平移」，易误触；右键长按也不开。
+            key_middle: false,
             key_side: true,
             key_rhold: false,
             trig_custom_kind: 0,
@@ -2516,17 +2518,9 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
     buf.fill(0);
     // 有幽灵时按 `n+1` 排布：幽灵占一个真实槽位、整环让位（用户 2026-10-12 要求）
     let n_ap = st.apps.len();
-    // 教学虚线槽位（onboarding ①）**也算一格** —— 与幽灵同款排布，整环让位。
-    // ⚠️ 真实拖入进行中必须藏：否则和 `drop_ghost` / 窗口捕获同时出现 = 两个空位，
-    //    用户读不懂哪个是自己的落点（2026-10-14 定的：拖拽开始先藏教学槽位）。
-    // ⚠️ `onb_customized` 也要算进去（用户 2026-10-15）：他环上已经有**自己加的**应用，
-    //    就没必要再教"拖进来添加" —— 出厂那 8 个谁都有，光看 `onb_drag` 分不出
-    //    「拿到的是默认配置」和「自己已经配好了」。
-    let onb_slot = !st.onb_drag && !st.onb_customized
-        && st.drop_ghost.is_none() && st.window_capture.is_none();
-    let n = n_ap
-        + if st.drop_ghost.is_some() { 1 } else { 0 }
-        + if onb_slot { 1 } else { 0 };
+    // 虚线教学槽位已取消（用户 2026-10-18：它常驻、且位置与真实图标重叠）。
+    // 现在「拖进来会多一格」只在**真正拖动时**由 `drop_ghost` 幽灵磁贴体现。
+    let n = n_ap + if st.drop_ghost.is_some() { 1 } else { 0 };
     if n == 0 {
         return;
     }
@@ -2884,32 +2878,7 @@ unsafe fn draw_scene(st: &mut State, buf: &mut [u8]) {
         }
     }
 
-    // ── 3a2. 教学虚线槽位（onboarding ①）：还没拖入过 → 内环末位留一个虚线槽 ──
-    // 这是「可以把东西拖进环里」**唯一看得见的入口**：手势藏起来，用户永远发现不了。
-    // 槽位的位置与幽灵同款（`ghost_pos` = 末位槽，`n` 已含它，所以整环让位）。
-    // ⚠️ 它**只有一个消失条件**：用户真的拖入成功（`onb_drag`）—— 不是"看过就算"，
-    //    所以不需要任何"已读"状态机（用户 2026-10-14 的设计核心）。
-    // 项目没有虚线原语 → 沿四条边摆小圆角条（和"移除区整圈虚线"同手法）。
-    if onb_slot {
-        let (gx, gy) = ghost_pos(st);
-        let half = icon_draw * 0.5;
-        let col = mixc(pal.paper, pal.ink, 0.38);
-        let seg = half * 2.0 / 5.0; // 每边 5 段
-        let hw = seg * 0.30;
-        let pi2 = std::f32::consts::FRAC_PI_2;
-        for k in 0..5 {
-            let t = -half + seg * (k as f32 + 0.5);
-            rot_rrect(buf, gx + t, gy - half, hw, 0.9, 0.9, 0.0, col, 0.9);
-            rot_rrect(buf, gx + t, gy + half, hw, 0.9, 0.9, 0.0, col, 0.9);
-            rot_rrect(buf, gx - half, gy + t, hw, 0.9, 0.9, pi2, col, 0.9);
-            rot_rrect(buf, gx + half, gy + t, hw, 0.9, 0.9, pi2, col, 0.9);
-        }
-        // 中心「＋」：一眼读出「这里是加东西的地方」
-        let acc = mixc(pal.paper, pal.ink, 0.55);
-        let plus = half * 0.30;
-        rot_rrect(buf, gx, gy, plus, 1.0, 1.0, 0.0, acc, 0.9);
-        rot_rrect(buf, gx, gy, plus, 1.0, 1.0, pi2, acc, 0.9);
-    }
+    // （教学虚线槽位已移除：它常驻且与图标重叠；落点指引改由拖动时的 `drop_ghost` 承担。）
 
     // ── 3b. 取消按钮（拖出去松手后出现，边框走 5 秒倒计时）──
     // 画法抄自 my-pet `objects/dialogs/dynamic_island.py::_paint_event_countdown`：
@@ -3999,16 +3968,135 @@ fn host_app_index(st: &State, host_exe: &str) -> Option<usize> {
         .position(|a| exe_name_of(&a.target).as_deref() == Some(want.as_str()))
 }
 
+/// target 打开的是不是一个文件夹（`shell:` 文件夹命名空间，或真实目录路径）。
+fn target_opens_folder(target: &str) -> bool {
+    let t = target.trim();
+    if t.starts_with("shell:") {
+        // shell: 文件夹命名空间（UsersFilesFolder / Downloads / Personal…）。
+        // ⚠️ 不走 `shell_ns_to_path`：它没收录 UsersFilesFolder（默认 hub 就是它）。
+        return true;
+    }
+    if t.contains("://") || t.starts_with('@') {
+        return false; // URL / 内置动作（@act:start）不是文件夹
+    }
+    std::path::Path::new(t).is_dir()
+}
+
+/// 内环里的「文件夹 hub」索引 —— 拖进来的文件夹应归它，而不是另开一个 explorer 应用。
+/// 判据：target 是 `shell:` 文件夹命名空间（默认「文件夹」=shell:UsersFilesFolder），
+/// 或它已聚合了文件夹条目（像默认 hub 那样挂了下载/文档）。
+/// ⚠️ 刻意**不**把「裸的顶层文件夹应用」（target 就是一个目录、没有条目）算作 hub，
+///    否则用户拖一个新文件夹会被塞进某个不相干目录的外环里。
+fn folder_hub_index(st: &State) -> Option<usize> {
+    st.apps.iter().position(|a| {
+        a.target.trim().starts_with("shell:")
+            || a.items.iter().any(|it| target_opens_folder(&it.target))
+    })
+}
+
+/// 是不是资源管理器（explorer.exe）——它承载的是**文件夹窗口**，
+/// 拖这种窗口进环应归「文件夹」hub，而不是另开一个 explorer 内环。
+fn is_explorer_exe(exe: &str) -> bool {
+    exe_name_of(exe).as_deref() == Some("explorer.exe")
+}
+
+/// 当前拖拽会话「已算过预览的载荷签名」。同一会话里 DragOver 每 3px 就跑一次
+/// `compute_drop_preview`，而 .lnk 载荷每次都要 `resolve_host_exe`(COM 解析快捷方式)
+/// + `decode_icon`(~76ms) + `host_app_index`(逐 app 再解析 .lnk) —— 一次拖拽上百次
+/// 会把 UI 拖死（用户 2026-10-18：「拖动添加特别卡、添加不上」）。载荷在同一次拖拽里
+/// 不变 → 命中就直接复用上次结果。DragEnter / 离开 / 落下时失效。
+static PREVIEW_KEY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn preview_key(items: &[DropItem]) -> String {
+    match items.first() {
+        None => String::new(),
+        Some(it) => format!(
+            "{}|{}|{}|{}",
+            items.len(),
+            it.target,
+            it.is_dir as u8,
+            it.name
+        ),
+    }
+}
+
 /// 拖入时算「建议目标 / 幽灵」：认得出宿主内环 → 高亮它；认不出 → 出幽灵。
 /// 结果存进 `st.drop_suggest` / `st.drop_ghost`，供渲染与落点判定用。
 fn compute_drop_preview(st: &mut State, items: &[DropItem]) {
+    let key = preview_key(items);
+    {
+        let mut c = PREVIEW_KEY.lock().unwrap_or_else(|e| e.into_inner());
+        if !key.is_empty() && c.as_deref() == Some(key.as_str()) {
+            return; // 同一会话、载荷未变 → 复用上次预览
+        }
+        *c = Some(key);
+    }
+    compute_drop_preview_body(st, items);
+}
+
+/// 拖拽会话边界（进入/离开/落下）→ 失效预览缓存。
+fn drop_preview_invalidate() {
+    *PREVIEW_KEY.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+fn compute_drop_preview_body(st: &mut State, items: &[DropItem]) {
     st.drop_suggest = None;
     st.drop_ghost = None;
     let Some(it) = items.first() else {
         return;
     };
-    // 载荷本身就是应用（exe/lnk）→ 走经典「拖进来加个内环」，不出高亮/幽灵
+    // 拖**文件夹**：优先归到已有的「文件夹」hub（默认 target=shell:UsersFilesFolder）
+    // → 高亮它，丢上去就成为它外环里的一个文件夹条目。
+    // ⚠️ 之前这里落到通用 host 分支：`resolve_host_exe` 把目录当 explorer.exe，
+    //    而 `host_app_index` 只按 exe 名比 → `shell:` hub 永远匹配不上
+    //    → 另开一个 explorer 内环（用户 2026-10-18 报「跟默认文件夹不是一个内环图标」）。
+    if it.is_dir {
+        if let Some(ai) = folder_hub_index(st) {
+            st.drop_suggest = Some(ai);
+            return;
+        }
+        // 没有文件夹 hub → 幽灵 = 这个文件夹本身（新建顶层应用打开它）
+        let icon = unsafe { decode_icon(&it.target) }.map(|(px, d)| IconTex::from_base(px, d));
+        if st.apps.len() < MAX_APPS {
+            st.drop_ghost = Some(GhostApp {
+                name: it.name.clone(),
+                target: it.target.clone(),
+                put_items: false,
+                icon,
+            });
+        }
+        return;
+    }
+    // 载荷本身就是应用（exe/lnk）→ 也浮一个**图标占位符**（与底下「认不出宿主」同款幽灵）：
+    // 拖动中就能看见「会落在哪」，松手 `create_from_ghost` 把它变实体（2026-10-18：
+    // 原 early-return 无任何占位符，用户拖 app 进环时看不到落点）。已在内环则不出（落下报「已在环上」）。
     if exe_name_of(&it.target).is_some() {
+        if let Some(exe_s) = unsafe { resolve_host_exe(it) } {
+            let dup = host_app_index(st, &exe_s).is_some();
+            if st.apps.len() < MAX_APPS && !dup {
+                let name = exe_name_of(&exe_s)
+                    .map(|b| clamp_name(b.trim_end_matches(".exe")))
+                    .unwrap_or_else(|| it.name.clone());
+                let icon =
+                    unsafe { decode_icon(&exe_s) }.map(|(px, d)| IconTex::from_base(px, d));
+                st.drop_ghost = Some(GhostApp {
+                    name,
+                    target: it.target.clone(),
+                    put_items: false,
+                    icon,
+                });
+            }
+        } else if st.apps.len() < MAX_APPS {
+            // 解析不出宿主（罕见）→ 直接以载荷自身为应用
+            let icon =
+                unsafe { decode_icon(&it.target) }.map(|(px, d)| IconTex::from_base(px, d));
+            st.drop_ghost = Some(GhostApp {
+                name: it.name.clone(),
+                target: it.target.clone(),
+                put_items: false,
+                icon,
+            });
+        }
         return;
     }
     let host_dbg = unsafe { resolve_host_exe(it) };
@@ -4107,10 +4195,13 @@ fn process_drop(st: &mut State, items: &[DropItem], force_app: Option<usize>) ->
                 .iter()
                 .position(|a| a.target.contains("://") || a.items.iter().any(|x| x.target.contains("://")))
         } else if it.is_dir {
-            // 推荐：资源管理器（target 或已有条目是目录）
-            st.apps.iter().position(|a| {
-                a.target.eq_ignore_ascii_case("explorer.exe")
-                    || a.items.iter().any(|x| std::path::Path::new(&x.target).is_dir())
+            // 推荐：已有的文件夹 hub（target=shell:UsersFilesFolder 的默认「文件夹」）
+            // → 归它外环；没有 hub 才退到资源管理器（target 或已有条目是目录）
+            folder_hub_index(st).or_else(|| {
+                st.apps.iter().position(|a| {
+                    a.target.eq_ignore_ascii_case("explorer.exe")
+                        || a.items.iter().any(|x| std::path::Path::new(&x.target).is_dir())
+                })
             })
         } else {
             None
@@ -4165,69 +4256,22 @@ fn process_drop(st: &mut State, items: &[DropItem], force_app: Option<usize>) ->
 }
 
 /// 出厂默认（读不到任务栏时的兜底）—— 只用**系统自带且一定存在**的东西。
-const DEFAULT_FALLBACK: [(&str, &str); 6] = [
-    ("浏览器", "https://www.bing.com"),
-    ("资源管理器", "explorer.exe"),
-    ("记事本", "notepad.exe"),
-    ("终端", "cmd.exe"),
-    ("任务管理器", "taskmgr.exe"),
-    ("设置", "ms-settings:"),
-];
+// 出厂默认已改为固定清单（见 `default_apps`），不再需要任务栏兜底。
 
-/// 出厂默认展示哪些应用：**读任务栏钉着的那些**（`%APPDATA%\...\User Pinned\TaskBar`）。
+/// 出厂默认应用：**发挥径向菜单优势，不放任务栏的复制品**。
 ///
-/// 为什么是任务栏而不是开始菜单：任务栏固定项是用户**自己钉的**，正是日常用的那几个；
-/// 开始菜单有 200+ 项，按名字排在前面的多半是卸载残留。读不到就退回 `DEFAULT_FALLBACK`。
-///
-/// 只读目录 + 文件名（`.lnk` 直接当 target 存着，launch 走 ShellExecute 本来就支持 .lnk），
-/// 不碰 COM、不解析快捷方式的目标 —— 首启零延迟。
+/// 只放「高频 + 触达成本高（需导航/输入/多步）+ 用户不会主动钉常驻」的东西：
+/// 文件夹（聚合下载/文档等 → 外环）、浏览器（一圈点开常用 AI / 新标签），开始菜单兜底入口。
+/// 「文件夹」本体 = 打开用户文件夹（下载/文档的父级，`shell:` 协议 → 每次新开一个窗口，
+/// 不走 `find_window_of_exe` 去聚焦已有的资源管理器进程）；外环才是下载/文档这些具体位置。
+/// URL 与 `shell:` 都交给 `ShellExecuteW` 处理（默认浏览器 / 资源管理器自动接管），
+/// 无需自行定位浏览器 exe。
 fn default_apps() -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let dir = std::path::PathBuf::from(appdata)
-            .join("Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar");
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            let mut v: Vec<(String, String)> = Vec::new();
-            for e in rd.flatten() {
-                let p = e.path();
-                if !p
-                    .extension()
-                    .and_then(|x| x.to_str())
-                    .map(|x| x.eq_ignore_ascii_case("lnk"))
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                let mut name = p
-                    .file_stem()
-                    .and_then(|x| x.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                // 中文系统里钉出来的快捷方式常带这个后缀
-                for suf in [" - 快捷方式", " - Shortcut"] {
-                    if let Some(t) = name.strip_suffix(suf) {
-                        name = t.to_string();
-                    }
-                }
-                if name.is_empty() {
-                    continue;
-                }
-                v.push((name, p.display().to_string()));
-            }
-            v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
-            out.extend(v.into_iter().take(MAX_APPS - 1));
-        }
-    }
-    if out.is_empty() {
-        out.extend(
-            DEFAULT_FALLBACK
-                .iter()
-                .map(|(n, t)| ((*n).to_string(), (*t).to_string())),
-        );
-    }
-    // 末尾固定给「开始菜单」留一格
-    out.push(("开始菜单".to_string(), "@act:start".to_string()));
-    out
+    vec![
+        ("文件夹".to_string(), "shell:UsersFilesFolder".to_string()),
+        ("浏览器".to_string(), "https://www.bing.com".to_string()),
+        ("开始菜单".to_string(), "@act:start".to_string()),
+    ]
 }
 
 /// 当前 `[apps]` 是否已被用户改过（≠ 出厂默认）。
@@ -4579,14 +4623,28 @@ unsafe fn restamp_window_hwnds(st: &mut State) {
 
 /// 确保宿主应用存在（内环有 → 返回索引；没有 → 内存+ini 新建一个），返回索引。
 fn ensure_host_app(st: &mut State, exe: &str) -> usize {
+    // Explorer 文件夹窗口 → 优先归「文件夹」hub，而不是另开一个 explorer 内环。
+    // ⚠️ 排在 `host_app_index` 之前：已有的 explorer 应用（历史 bug 建的）也要让位，
+    //    否则新拖进来的文件夹窗口还会被塞回那个重复的 explorer 内环。
+    if is_explorer_exe(exe) {
+        if let Some(ai) = folder_hub_index(st) {
+            return ai;
+        }
+    }
     if let Some(ai) = host_app_index(st, exe) {
         return ai;
     }
-    let name = clamp_name(exe.trim_end_matches(".exe"));
+    let name = clamp_name(
+        exe_name_of(exe)
+            .map(|b| b.trim_end_matches(".exe").to_string())
+            .unwrap_or_else(|| exe.to_string())
+            .as_str(),
+    );
+    let app_icon = unsafe { decode_icon(exe) }.map(|(px, d)| IconTex::from_base(px, d));
     st.apps.push(AppEntry {
         name: name.clone(),
         target: exe.to_string(),
-        icon: unsafe { decode_icon(exe) }.map(|(px, d)| IconTex::from_base(px, d)),
+        icon: app_icon,
         items: Vec::new(),
         grad: grad_for(&name),
     });
@@ -4805,11 +4863,18 @@ unsafe fn arm_window_capture(st: &mut State, hw: HWND) {
     });
     st.drop_suggest = None;
     st.drop_ghost = None;
-    match host_app_index(st, &exe) {
+    // Explorer 文件夹窗口 → 预览就高亮「文件夹」hub（别再浮 explorer 幽灵）。
+    let hub = if is_explorer_exe(&exe) { folder_hub_index(st) } else { None };
+    match hub.or_else(|| host_app_index(st, &exe)) {
         Some(ai) => st.drop_suggest = Some(ai),
         None if st.apps.len() < MAX_APPS => {
-            let name = clamp_name(exe.trim_end_matches(".exe"));
-            // ⚠️ 走缓存：`decode_icon` ~76ms，而这里是 `WM_MOUSEMOVE` 热路径。
+        let name = clamp_name(
+            exe_name_of(&exe)
+                .map(|b| b.trim_end_matches(".exe").to_string())
+                .unwrap_or_else(|| exe.to_string())
+                .as_str(),
+        );
+        // ⚠️ 走缓存：`decode_icon` ~76ms，而这里是 `WM_MOUSEMOVE` 热路径。
             let icon = {
                 let key = exe.to_ascii_lowercase();
                 let mut c = WC_ICON_CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -7226,19 +7291,21 @@ fn grad_for(name: &str) -> usize {
 
 // ───────────────────── 配置（settings.ini） ─────────────────────
 
-/// 出厂配置。`[apps]` 段由 `default_apps()` 动态生成（任务栏固定项 + 开始菜单）。
+/// 出厂配置。`[apps]` 段由 `default_apps()` 生成（浏览器 / 下载 / 文档 / 开始菜单）。
 fn default_ini() -> String {
     let mut s = String::from("[apps]\r\n");
     for (n, t) in default_apps() {
         s.push_str(&format!("{}={}\r\n", n, t));
     }
-    // 两个示例外环（只有对应应用存在时才会被用上，否则加载时自然忽略）
-    s.push_str("\r\n[app.资源管理器]\r\n");
+    // 文件夹外环：下载/文档（段名须与内环「文件夹」一致）
+    s.push_str("\r\n[app.文件夹]\r\n");
     s.push_str("下载=shell:Downloads\r\n");
     s.push_str("文档=shell:Personal\r\n");
-    s.push_str("桌面=shell:Desktop\r\n");
-    s.push_str("\r\n[app.终端]\r\n");
-    s.push_str("PowerShell=powershell.exe\r\n");
+    // 浏览器外环：一圈点开常用 AI / 新标签（段名须与内环「浏览器」一致）
+    s.push_str("\r\n[app.浏览器]\r\n");
+    s.push_str("DeepSeek=https://chat.deepseek.com\r\n");
+    s.push_str("豆包=https://www.doubao.com\r\n");
+    s.push_str("新标签页=about:blank\r\n");
     s
 }
 
@@ -11264,6 +11331,10 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     // 同步刷新「最后一次拖放活动」时间戳，与 OLE 回调保持一致
                     // （这样任何来源的 arming 都会重新计时，超时兜底不会误判为陈旧）
                     DROP_ARM_AT.store(GetTickCount(), Ordering::SeqCst);
+                    // 新拖拽会话（进入）→ 失效预览缓存，保证首帧重算；后续 DragOver 复用
+                    if w.0 == 0 {
+                        drop_preview_invalidate();
+                    }
                     let items = DROP_PAYLOAD.lock().map(|q| q.clone()).unwrap_or_default();
                     compute_drop_preview(st, &items);
                     st.drop_target_app = drop_force_app(st, sx, sy);
@@ -11276,10 +11347,12 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) 
                     st.drop_target_app = None;
                     st.drop_suggest = None;
                     st.drop_ghost = None;
+                    drop_preview_invalidate();
                     set_mood(st, 0);
                 }
                 // 落下：**按落点归属**（不再自动挑目标）
                 _ => {
+                    drop_preview_invalidate();
                     let items = DROP_PAYLOAD
                         .lock()
                         .map(|mut q| std::mem::take(&mut *q))
