@@ -4,7 +4,7 @@
   <a href="https://github.com/lifeFxxker/pipie/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pipie?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
-  <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
+  <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
 </p>
 
 **[English](README.en.md) · [简体中文](README.md)**
@@ -107,7 +107,7 @@ design/preview-*.png   README 使用的截图
 
 ## 许可证
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 PiPie
+[MIT](LICENSE) © 2026 PiPie
 
-**禁止商业用途**；允许个人学习、研究、私人娱乐与改动（详见 LICENSE）。
-需要商用请先联系作者获得单独授权。
+可以自由使用、修改、分发、商用，包括闭源分发，只需保留版权与许可声明。
+未来若推出云同步等付费服务，客户端仍保持开源 —— 边界见 [LICENSING.md](LICENSING.md)。

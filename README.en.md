@@ -4,7 +4,7 @@
   <a href="https://github.com/lifeFxxker/pipie/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pipie?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
-  <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
+  <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
 </p>
 
 **[English](README.en.md) · [简体中文](README.md)**
@@ -107,7 +107,9 @@ design/preview-*.png   Screenshots used by the README
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 PiPie
+[MIT](LICENSE) © 2026 PiPie
 
-**Noncommercial use only.** Personal study, research, private entertainment, and
-modification are permitted. Commercial use requires a separate license from the author.
+Free to use, modify, redistribute, and sell, including inside closed-source
+products — just keep the copyright and permission notice. If paid services such
+as cloud sync are added later, the client stays open source; see
+[LICENSING.md](LICENSING.md) for the boundary.
