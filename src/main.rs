@@ -4438,6 +4438,25 @@ unsafe fn moving_window() -> Option<HWND> {
     }
 }
 
+/// `moving_window()` 的节流版：它要 `AttachThreadInput` 到前台线程，60fps 反复挂/摘
+/// 会让**正在拖窗的那个线程**发涩（用户 2026-10-20 报「拖窗口卡顿」）。
+/// 策略：**正在拖**（上次有结果）时 90ms 才复查一次（≈11 次/秒）；**没在拖**
+/// （上次 None）时每帧都查，保证拖拽起手立刻被发现、松手最多晚 90ms 落盘。
+fn moving_window_throttled() -> Option<HWND> {
+    use std::sync::atomic::{AtomicIsize, AtomicU32};
+    static AT: AtomicU32 = AtomicU32::new(0);
+    static RES: AtomicIsize = AtomicIsize::new(0);
+    let now = unsafe { windows::Win32::System::SystemInformation::GetTickCount() };
+    let prev = RES.load(Ordering::Relaxed);
+    if prev != 0 && now.wrapping_sub(AT.load(Ordering::Relaxed)) < 90 {
+        return Some(HWND(prev as *mut c_void));
+    }
+    let r = unsafe { moving_window() };
+    AT.store(now, Ordering::Relaxed);
+    RES.store(r.map(|h| h.0 as isize).unwrap_or(0), Ordering::Relaxed);
+    r
+}
+
 /// 窗口标题（GetWindowTextW）
 unsafe fn window_title(hwnd: HWND) -> String {
     let mut buf = [0u16; 260];
@@ -5008,7 +5027,7 @@ unsafe fn poll_window_capture(st: &mut State) -> bool {
         if st.window_capture.as_ref().unwrap().test {
             return true;
         }
-        if moving_window().is_some() {
+        if moving_window_throttled().is_some() {
             return true; // 还在拖
         }
         // 松手 → 光标在盘面内才落盘
@@ -5034,7 +5053,7 @@ unsafe fn poll_window_capture(st: &mut State) -> bool {
         set_mood(st, 0);
         over
     } else if MENU_OPEN.load(Ordering::Relaxed) {
-        if let Some(hw) = moving_window() {
+        if let Some(hw) = moving_window_throttled() {
             let mh = MAIN_HWND.load(Ordering::Relaxed);
             let rh = RING_HWND.load(Ordering::Relaxed);
             if hw.0 as isize != mh && hw.0 as isize != rh {
