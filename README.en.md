@@ -7,109 +7,80 @@
   <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
 </p>
 
-**[English](README.en.md) · [简体中文](README.md)**
+**English · [简体中文](README.md)**
 
-A radial app launcher for Windows. Summon a cursor-centered dial with a mouse side button, pin your frequently used apps to the inner ring, and hover an app to fan out its open windows on the outer ring — with a live window preview. One native executable, no runtime, no installer.
-
----
+A cursor-centred radial launcher for Windows. Press a mouse side button and the ring opens at the pointer; hover an app and its windows fan out beside it, with live previews. One file, no runtime, no installer.
 
 ## Demo
 
-![Demo](design/preview-demo.gif)
+![Interaction demo](design/preview-demo.gif)
 
-Hover an app to fan out its open windows; hold and drag an inner tile to reorder it (insertion, not a simple swap).
+Hover an app to fan out its windows; drag an inner-ring icon to reorder.
 
-## Screenshots
+## Resource usage
 
-| Inner ring | Outer ring — an app's open windows |
-| :---: | :---: |
-| ![Inner ring](design/preview-ring.png) | ![Outer ring](design/preview-chips.png) |
-| A running app gets a dot under its icon. | Hovering an app fans its windows out beside it. |
+Measured on Windows 11 (build 26200), i3-12100F (4C/8T), 16 GB RAM, release build of `PiPie.exe` (745 KB).
 
-| Live window preview | Settings |
-| :---: | :---: |
-| ![Live preview](design/preview-live.png) | ![Settings](design/preview-apps.png) |
-| Hover a window chip for a live DWM thumbnail. | Flat, paper-style preferences. |
+| State | CPU | Memory (working set) | Commit | Handles | Threads |
+| --- | --- | --- | --- | --- | --- |
+| Idle (tray only, 20 s average) | 0.01% | 0.2 MB | 11.4 MB | 370 | 13 |
+| Ring open (5 s average) | 2.15% | 4.9 MB | 13.1 MB | 366 | 12 |
+
+- CPU is a share of the whole machine, not of one core.
+- The 0.2 MB idle working set is because the app hands its pages back to the OS while hidden (`SetProcessWorkingSetSize`). The real footprint is the 11.4 MB commit; the cost is one minor page-in on the first summon.
+- The 2% while open comes from software rendering and sampling the desktop behind the glass — frames are redrawn continuously.
 
 ## Features
 
-- **Cursor-centered dial** — Appears exactly where your pointer is, so you never travel to a corner of the screen.
-- **Two-level layout** — The inner ring holds pinned apps; the outer ring expands the hovered app's windows as capsules grouped next to that app, not spread across the whole circle.
-- **Drag to organize** — Drop a shortcut, `.exe`, folder, or file onto the inner ring to pin it. Reorder, rename, and remove from the same view.
-- **Live window previews** — Hover a window capsule to see that window in real time (`DwmRegisterThumbnail`), including minimized windows. Video and animation stay live — it is not a screenshot.
-- **Running indicators** — Apps with an open window show a small dot beneath their icon.
-- **Liquid-glass material** — A subtle glass finish on the dial only; the settings page stays flat paper for readability.
-- **Built-in actions** — e.g. `@act:start` opens the Windows Start menu directly.
-- **Flexible invocation** — A side button by default; switch to the middle button, long-press right button, or a recorded key combo such as `Ctrl+W`.
-- **Resident & autostart** — Optionally start at login and live in the tray.
-- **Single file, zero dependencies** — The build output is one `PiPie.exe` (≈700 KB); no .NET or other runtime is required.
+- **Opens at the pointer** — no travelling to a screen corner.
+- **Two rings** — apps on the inner ring, their open windows as capsules on the outer ring, hugging the app instead of scattering around the circle.
+- **Live window previews** — DWM thumbnails, including the last frame of a minimised window. Not screenshots.
+- **Drag to pin** — shortcuts, `.exe` files, folders and files can be dropped on the inner ring; reorder, rename and remove in the same view.
+- **One file, no dependencies** — a 745 KB `PiPie.exe`. No .NET, no runtime.
+- **Several ways to summon** — mouse side button by default; middle button, long right-press, or a recorded key combo.
 
-## Installation
+## Screenshots
 
-### Download
+| Inner ring | Outer ring — windows of one app |
+| :---: | :---: |
+| ![Inner ring](design/preview-ring.png) | ![Outer ring](design/preview-chips.png) |
+| Running apps get a dot under their icon. | Hover an app and its windows fan out as capsules beside it. |
 
-Grab the latest `pipie-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pipie/releases) page, unzip it anywhere, and run `PiPie.exe`.
+| Live preview | Settings |
+| :---: | :---: |
+| ![Live preview](design/preview-live.png) | ![Settings](design/preview-apps.png) |
+| Hover a capsule for a live DWM thumbnail. | Flat, paper-like preferences. |
 
-> If no release is published yet, build it locally (below).
+> The binary is unsigned; SmartScreen will ask for "More info → Run anyway" on first launch. Download only from this repository's Releases.
+
+## Install
+
+Grab `pipie-vX.Y.Z-win64.zip` from [Releases](https://github.com/lifeFxxker/pipie/releases), extract anywhere, run `PiPie.exe`. Nothing to install.
 
 ### Build from source
 
-**Prerequisites**
-
-- Windows 10 / 11, **x64**
-- [Rust](https://rustup.rs/) (edition 2021)
-- MSVC toolchain — Visual Studio Build Tools, or `winget install Microsoft.VisualStudio.BuildTools`
-- Windows SDK — used to embed the exe icon; if it is missing the icon step is skipped and the build still succeeds
+You need Windows 10/11 x64, [Rust](https://rustup.rs/), the MSVC toolchain (`winget install Microsoft.VisualStudio.BuildTools`) and the Windows SDK (used to embed the icon; skipped if missing).
 
 ```bash
-cargo build --release
-# -> target/release/PiPie.exe
+cargo build --release      # -> target/release/PiPie.exe
+python package.py          # -> dist/pipie-v<version>-win64.zip
 ```
 
-> **Keep `lto = "thin"` in `Cargo.toml`.** Do not switch to fat LTO (`"true"`): the current toolchain miscompiles this project's `unsafe` FFI and the app crashes on launch (`0xC0000409`).
-
-Package a single-file zip:
-
-```bash
-python package.py
-# -> dist/PiPie.exe  and  dist/pipie-v1.0.0-win64.zip
-```
+> **Do not change `lto = "thin"` in `Cargo.toml`.** With fat LTO (`"true"`) the current toolchain miscompiles this project's `unsafe` FFI and the app dies on startup (`0xC0000409`).
 
 ## Usage
 
-- **Invoke** — Press the **mouse side button** (default; the middle button can be enabled in Settings) to pop the dial at the cursor. Release to launch the highlighted app; press `Esc` or any other key to cancel. Long-press right button or a custom combo are also available.
-- **Pin an app** — Drag a shortcut, `.exe`, folder, or file onto an inner tile.
-- **Add a window** — Drag a window onto the dial to group it under its app; it then appears on that app's outer ring.
-- **Preview** — Hover an app to fan out its windows; hover a window capsule for a live preview.
-- **Settings** — Open from the tray icon (right-click → 设置…). The settings page is flat paper, deliberately not glass.
+- **Summon** — hold the mouse side button; the ring opens at the pointer. Release to launch the highlighted app, `Esc` or any other key to cancel.
+- **Pin** — drag a shortcut, `.exe`, folder or file onto an inner-ring tile.
+- **Adopt a window** — drag a window onto the ring to attach it to its app.
+- **Preview** — hover an app to fan out its windows; hover a capsule for a live thumbnail.
+- **Settings** — right-click the tray icon → Settings.
 
 ## Configuration
 
-Configuration lives in `%APPDATA%\PiPie\settings.ini`, created on first run and normally edited through the in-app Settings page. Logs are written to `%LOCALAPPDATA%\PiPie\logs\`.
-
-## How it works
-
-- **Pure Win32 via `windows-rs`** — No UI framework. A self-contained software renderer keeps the binary small, the startup fast, and the footprint runtime-free.
-- **Layered window** — The dial is presented through `UpdateLayeredWindow` with premultiplied alpha. The glass material samples the desktop behind the dial, which is why it is refreshed on every invocation.
-- **Previews are DWM thumbnails** — Because a layered window cannot be a DWM thumbnail source, previews are rendered in a separate plain top-level window using `DwmRegisterThumbnail`. The result is a live picture rather than a static capture, and minimized windows still show their last frame.
-- **One layout for drawing and hit-testing** — The inner ring and outer capsules share a single layout routine, so what you see is exactly what you click.
-
-## Project layout
-
-```
-src/main.rs            All logic — native Win32 + a software renderer
-app.rc / app.ico       Executable version info and icon
-build.rs               Embeds the icon via the Windows SDK rc.exe (skipped if absent)
-package.py             One-step packaging into a zip
-tools/                 Dev-only helpers (icon generation / log analysis / screenshot & release scripts; optional)
-design/preview-*.png   Screenshots used by the README
-```
+`%APPDATA%\PiPie\settings.ini`, created on first run; normally edited through the settings page. Logs go to `%LOCALAPPDATA%\PiPie\logs\`. Upgrading from the old Pigo build copies the legacy config automatically on first launch.
 
 ## License
 
-[MIT](LICENSE) © 2026 PiPie
-
-Free to use, modify, redistribute, and sell, including inside closed-source
-products — just keep the copyright and permission notice. If paid services such
-as cloud sync are added later, the client stays open source; see
-[LICENSING.md](LICENSING.md) for the boundary.
+[MIT](LICENSE). Use it, modify it, redistribute it, sell it — including in closed-source products — as long as you keep the copyright and permission notice.
+If paid services are added later, the client stays open source; see [LICENSING.md](LICENSING.md) for the boundary.
