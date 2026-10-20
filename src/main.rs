@@ -10315,6 +10315,9 @@ unsafe fn remove_tray_icon(hwnd: HWND) {
 }
 
 unsafe fn set_running(st: &mut State, on: bool) {
+    // `listening`（用户意图，`save_settings` 写它）与 `running`（实际钩子状态）保持同步：
+    // 否则任何在钩子安装前发生的保存都会把 listening 写成 0。
+    st.listening = on;
     if st.running == on {
         return;
     }
@@ -14414,7 +14417,10 @@ unsafe fn save_settings(st: &State) {
     out.push_str("[设置]\r\n");
     out.push_str(&format!("dark={}\r\n", st.theme));
     out.push_str(&format!("persistent={}\r\n", b(st.persistent)));
-    out.push_str(&format!("listening={}\r\n", b(st.running)));
+    // ⚠️ 写 `listening`（用户意图），不能写 `running`（运行时实际钩子状态）：
+    // 启动早期 `running` 还是 false（钩子尚未安装），此时任何 `save_settings`
+    // 都会把 listening=0 落盘 → 下次启动就不监听。2026-10-20 自动更新检查踩过。
+    out.push_str(&format!("listening={}\r\n", b(st.listening)));
     out.push_str(&format!("key_middle={}\r\n", b(st.key_middle)));
     out.push_str(&format!("key_side={}\r\n", b(st.key_side)));
     out.push_str(&format!("hover_name={}\r\n", b(st.hover_name)));
