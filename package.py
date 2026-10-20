@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, 'dist')
 BUILT = os.path.join(HERE, 'target', 'release', 'Pigo.exe')
 NAME = 'Pigo.exe'
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 
 
 def sh(cmd, **kw):
