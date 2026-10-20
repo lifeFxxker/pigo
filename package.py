@@ -4,7 +4,7 @@
 用法（在项目根目录）：python package.py
 产物：
   dist/PiPie.exe               主程序（单文件）
-  dist/README.txt              用法说明
+  dist/README.txt              用法说明（源头是 packaging/README.txt）
   dist/LICENSE.txt             MIT 许可声明（随 zip 分发）
   dist/SHA256SUMS              校验清单（在线升级的独立 release asset，不进 zip）
   dist/pipie-v<版本>-win64.zip        可直接发给别人
@@ -15,6 +15,7 @@
 """
 import hashlib
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -32,7 +33,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, 'dist')
 BUILT = os.path.join(HERE, 'target', 'release', 'PiPie.exe')
 NAME = 'PiPie.exe'
-VERSION = '1.0.2'
+
+
+def cargo_version():
+    """版本只在 Cargo.toml 写一次，这里读出来，避免打包脚本再抄一份。"""
+    with open(os.path.join(HERE, 'Cargo.toml'), encoding='utf-8') as f:
+        in_pkg = False
+        for line in f:
+            s = line.strip()
+            if s.startswith('['):
+                in_pkg = s == '[package]'
+                continue
+            if in_pkg and s.startswith('version'):
+                return s.split('"')[1]
+    raise SystemExit('Cargo.toml 的 [package] 段里找不到 version')
+
+
+VERSION = cargo_version()
+
+
+def check_app_rc_version():
+    """app.rc 的版本是手写的；和 Cargo.toml 不一致就会打出属性页版本错误的 exe。"""
+    txt = open(os.path.join(HERE, 'app.rc'), encoding='utf-8').read()
+    m = re.search(r'FILEVERSION\s+(\d+),(\d+),(\d+),(\d+)', txt)
+    if not m:
+        raise SystemExit('app.rc 里找不到 FILEVERSION')
+    got = '%s.%s.%s' % m.group(1, 2, 3)
+    if got != VERSION:
+        raise SystemExit(
+            'app.rc 的 FILEVERSION 是 %s，Cargo.toml 是 %s。\n'
+            '先把 app.rc 的 FILEVERSION / PRODUCTVERSION / FileVersion / ProductVersion '
+            '一起改掉再打包。' % (got, VERSION))
 
 
 def sh(cmd, **kw):
@@ -56,6 +87,8 @@ def pe_subsystem(path):
 
 
 def main():
+    check_app_rc_version()
+    print('版本 %s' % VERSION, flush=True)
     print('=== 1/4 编译（release，LTO + strip）===', flush=True)
     r = sh(['cargo', 'build', '--release'])
     if r.returncode != 0:
@@ -91,9 +124,10 @@ def main():
     with open(os.path.join(DIST, 'SHA256SUMS'), 'w', encoding='ascii', newline='\n') as f:
         f.write('%s  %s\n' % (sha, NAME))
     print('sha256 =', sha)
-    # README 若已存在就保留（它不在构建产物里）
-    if not os.path.exists(os.path.join(DIST, 'README.txt')):
-        print('（dist/README.txt 不存在，跳过）')
+    # 发布用 README.txt 来自受版本控制的 packaging/README.txt，每次覆盖
+    # （以前是"dist/ 里有就保留"，CI 里没有这个文件，打出来的 zip 就少一份说明）
+    shutil.copy2(os.path.join(HERE, 'packaging', 'README.txt'),
+                 os.path.join(DIST, 'README.txt'))
 
     print('=== 4/4 打 zip ===', flush=True)
     zname = 'pipie-v%s-win64.zip' % VERSION
