@@ -5,6 +5,7 @@
 产物：
   dist/PiPie.exe               主程序（单文件）
   dist/README.txt              用法说明
+  dist/LICENSE.txt             MIT 许可声明（随 zip 分发）
   dist/SHA256SUMS              校验清单（在线升级的独立 release asset，不进 zip）
   dist/pipie-v<版本>-win64.zip        可直接发给别人
 
@@ -19,6 +20,13 @@ import struct
 import subprocess
 import sys
 import zipfile
+
+# Windows 控制台默认是 GBK，下面 print 里的 ✓ / ⚠️ 会直接抛 UnicodeEncodeError。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, 'dist')
@@ -74,6 +82,9 @@ def main():
     kill_running()
     os.makedirs(DIST, exist_ok=True)
     shutil.copy2(BUILT, os.path.join(DIST, NAME))
+    # MIT 要求随分发附带版权与许可声明，所以 LICENSE 必须跟着 exe 进 zip。
+    # 每次从仓库根目录覆盖，避免 dist/ 里留着旧协议。
+    shutil.copy2(os.path.join(HERE, 'LICENSE'), os.path.join(DIST, 'LICENSE.txt'))
     # SHA256SUMS —— 在线升级用（updater 下载后强校验）。
     # ⚠️ 它是**独立的 release asset**，不进 zip（zip 白名单仍只有 exe+README）。
     sha = hashlib.sha256(open(os.path.join(DIST, NAME), 'rb').read()).hexdigest()
@@ -93,7 +104,7 @@ def main():
     # `settings.ini.bak`、`radial_log.txt`、`draglog.txt` 就会被**一起打进发布包**
     # → 用户解压后一启动就「默认不监听」（继承了开发者的 listening=0），
     # 引导状态、应用列表也全是别人的。用户 2026-10-14 报的就是这个。
-    RELEASE_FILES = [NAME, 'README.txt']
+    RELEASE_FILES = [NAME, 'README.txt', 'LICENSE.txt']
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         for fn in RELEASE_FILES:
             fp = os.path.join(DIST, fn)
@@ -106,7 +117,8 @@ def main():
         names = z.namelist()
         bad = [n for n in names
                if n.lower().endswith(('.ini', '.bak', '.log'))
-               or (n.lower().endswith('.txt') and n.lower() != 'readme.txt')]
+               or (n.lower().endswith('.txt')
+                   and n.lower() not in ('readme.txt', 'license.txt'))]
         if bad:
             print('❌ 发布包混入了不该有的文件：%s' % bad)
             return 1
