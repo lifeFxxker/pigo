@@ -48,6 +48,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/PiPie.exe
             dist/pipie-v*-win64.zip
             dist/SHA256SUMS
           fail_on_unmatched_files: true
