@@ -1,0 +1,54 @@
+name: Release
+
+# 只由标签触发：推 v1.1.0 这样的 tag，才会构建并发版。
+# 版本号只在 Cargo.toml 里写一次；下面的校验会拒绝 tag 和 Cargo.toml 不一致的情况。
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo.toml version
+        shell: pwsh
+        run: |
+          $v = python -c "import sys; sys.path.insert(0,'.'); from package import VERSION; print(VERSION)"
+          $tag = '${{ github.ref_name }}'
+          Write-Host "tag=$tag  Cargo.toml=$v"
+          if ("v$v" -ne $tag) {
+            Write-Error "标签 $tag 与 Cargo.toml 的版本 $v 不一致；先改 Cargo.toml（和 app.rc）再打 tag。"
+            exit 1
+          }
+
+      - name: Check app.rc version is in sync
+        run: python -c "import sys; sys.path.insert(0,'.'); import package; package.check_app_rc_version(); print('app.rc OK')"
+
+      - name: Build and package
+        run: python package.py
+
+      - name: Verify release artifacts
+        run: python tools/verify_release.py
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/pipie-v*-win64.zip
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
