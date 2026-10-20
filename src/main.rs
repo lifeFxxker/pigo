@@ -8,7 +8,7 @@
 //! 等诊断信息都靠 stdout 看。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! pigo —— 原生 Win32 圆形双环菜单启动器（自带软件渲染，零运行时依赖）
+//! PiPie —— 原生 Win32 圆形双环菜单启动器（自带软件渲染，零运行时依赖）
 //!
 //! 视觉（照搬 TheRing，参考 design/demos/demo-thering.html 与 design/thering_cover.jpg）：
 //!   一整块圆形玻璃盘（盘面跟随壁纸染色）+ 应用图标立在盘面一圈
@@ -51,7 +51,7 @@ use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
 /// ══ 全局界面缩放 ══
 /// 下面所有尺寸都写成「基准值 × K」。**要整体放大/缩小，只改这一个数。**
 /// 基准值是 K = 1.0 时的手感尺寸（盘面半径 178、图标 56 …）。
-/// 改完 `cargo build --release`，产物即 `target/release/pigo.exe`（单文件，拷走就能用）。
+/// 改完 `cargo build --release`，产物即 `target/release/PiPie.exe`（单文件，拷走就能用）。
 const K: f32 = 0.66;
 /// 图标单独缩放：比布局缩得少 → 盘子变小了但图标相对更大、更清楚。
 /// ⚠️ 这个值算出来的是**底板边长**（不是图标本身，图标还要再除 `TILE_PAD_K`）。
@@ -363,7 +363,7 @@ static DROP_ARM_AT: AtomicU32 = AtomicU32::new(0);
 /// `DROP_MODE_ARMED` 静默超过这么久（无任何 OLE 事件）就判定拖放会话已异常结束，自动解除。
 const DROP_ARM_TTL_MS: u32 = 3000;
 
-/// 拖放链路诊断日志（LocalAppData\pigo\logs\draglog.txt）
+/// 拖放链路诊断日志（LocalAppData\PiPie\logs\draglog.txt）
 fn drag_log(msg: &str) {
     use std::io::Write;
     let dir = log_dir();
@@ -380,7 +380,7 @@ fn drag_log(msg: &str) {
 //   B. 我们整个进程被冻结（待机/换页）        → WATCHDOG_GAP
 //   C. 输入在别处被卡（系统唤醒/别的钩子）    → 看门狗心跳连续 + A/B 都没有
 // 铁律：钩子回调里**绝不碰文件和锁**（那会反过来制造卡顿）——
-// 慢事件只打包进无锁环形缓冲，由看门狗线程每秒落盘 LocalAppData\pigo\logs。
+// 慢事件只打包进无锁环形缓冲，由看门狗线程每秒落盘 LocalAppData\PiPie\logs。
 
 const LOG_RING_SLOTS: usize = 128; // 2 的幂，取模用掩码
 static LOG_HEAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -4829,7 +4829,7 @@ fn relaunch_score(s: &str) -> usize {
     s.split_whitespace().count()
 }
 
-/// 窗口捕获 / 点击的落盘诊断（LocalAppData\pigo\logs\wincap.log）。
+/// 窗口捕获 / 点击的落盘诊断（LocalAppData\PiPie\logs\wincap.log）。
 /// 这条链路跨进程 + 跨 UIA，只看 ini 看不出"为什么存成了这样"，留个脚印。
 fn wlog(line: &str) {
     use std::io::Write;
@@ -5259,7 +5259,7 @@ unsafe fn fetch_page_title(url: &str) -> Option<String> {
         let p = u[8..].replace('/', "\\");
         return extract_title(&String::from_utf8_lossy(&std::fs::read(p).ok()?));
     }
-    let agent = wide("pigo/1.0");
+    let agent = wide("PiPie/1.0");
     let h = InternetOpenW(
         PCWSTR(agent.as_ptr()),
         INTERNET_OPEN_TYPE_PRECONFIG.0,
@@ -5395,7 +5395,7 @@ fn drive_root_from_label(label: &str) -> Option<String> {
 /// UI Automation 两条路（实测结构见下）：
 /// - **面包屑链**（首选）：`cls = FileExplorerExtensions.BreadcrumbBarItemControl`
 ///   的元素**按顺序**列出了路径的每一段，例如
-///   `此电脑` → `新加卷 (D:)` → `工作` → `IDEA` → `pigo`。
+///   `此电脑` → `新加卷 (D:)` → `工作` → `IDEA` → `PiPie`。
 /// - **地址栏 Edit**（备选）：`ct = Edit(50004)` / `cls = TextBox` / `name = 地址栏`，
 ///   `ValuePattern.CurrentValue` 直接给全路径 —— 但**折叠状态下是空的**，
 ///   用户没点过地址栏就拿不到。
@@ -6179,7 +6179,7 @@ unsafe fn thumb_ensure() -> HWND {
     }
     let hinst = HINSTANCE(GetModuleHandleW(None).unwrap_or_default().0);
     let cls: Vec<u16> = wide("RLThumb");
-    // 深色卡片底：Windows 的任务栏预览就是不透明卡片，这里跟 pigo 的灰调一致
+    // 深色卡片底：Windows 的任务栏预览就是不透明卡片，这里跟 PiPie 的灰调一致
     let brush = CreateSolidBrush(COLORREF(0x00202024));
     let _ = RegisterClassW(&WNDCLASSW {
         lpfnWndProc: Some(thumb_proc),
@@ -6697,7 +6697,7 @@ unsafe fn dump_all(dir: &str) {
             st.window_capture = Some(WindowCapture {
                 hwnd: 0,
                 exe: "c:\\windows\\explorer.exe".to_string(),
-                title: "pigo - 文件资源管理器".to_string(),
+                title: "PiPie - 文件资源管理器".to_string(),
                 relaunch: String::new(),
                 test: true,
             });
@@ -7046,9 +7046,9 @@ unsafe fn dump_all(dir: &str) {
 ///
 /// ⚠️ 两个必须注意的地方（都踩过）：
 /// ① **不能只按进程名匹配**。上一轮为了绕开「文件被占用」把 exe 改名成
-///    `pigo.old.exe` / `pigo.prev.exe`，测试实例又在 `_dragtest/` 下 ——
+///    `PiPie.old.exe` / `PiPie.prev.exe`，测试实例又在 `_dragtest/` 下 ——
 ///    按名字匹配会把它们**全部漏掉**（`--quit` 什么都没杀就是这么来的）。
-///    现在按**映像文件的完整路径**判断（文件名以 `pigo` / `radialmenu` / `radial-launcher` 开头）。
+///    现在按**映像文件的完整路径**判断（文件名以 `PiPie` / `radialmenu` / `radial-launcher` 开头）。
 /// ② **进程表里可能有「已退出但对象未回收」的僵尸**（异常终止 / 会话切换残留）。
 ///    它们 `GetExitCodeProcess` 返回的不是 `STILL_ACTIVE`，`taskkill` 会报
 ///    「没有此任务的实例在运行」。对这种 PID 调 `TerminateProcess` 纯属浪费，
@@ -7113,7 +7113,8 @@ unsafe fn kill_other_instances() {
                 String::from_utf16_lossy(&buf[..n])
             };
             let base = name.rsplit(['\\', '/']).next().unwrap_or(&name).to_ascii_lowercase();
-            let ours = base.starts_with("pigo")
+            let ours = base.starts_with("pipie")
+                || base.starts_with("pigo")
                 || base.starts_with("radialmenu")
                 || base.starts_with("radial-launcher");
             if pid != 0 && pid != me && ours {
@@ -7167,48 +7168,53 @@ fn exe_dir() -> String {
     }
 }
 
-/// 配置目录：`%APPDATA%\pigo`（**Roaming**）。
+/// 配置目录：`%APPDATA%\PiPie`（**Roaming**）。
 ///
 /// 为什么不放 exe 同目录（用户 2026-10-16 提的）：exe 一挪、一升级、换个目录解压，
 /// 配置就"丢"了 —— 用户得重新配一遍。放 `%APPDATA%` 是这个平台的标准做法：
 /// 与 exe 位置解耦，换用户账户/换机器（域漫游）还能跟着走。
 ///
-/// 环境变量 `PIGO_CONFIG_DIR` 可覆盖 —— 自动化测试用它指向沙箱，
+/// 环境变量 `PIPIE_CONFIG_DIR` 可覆盖 —— 自动化测试用它指向沙箱，
 /// **否则测试会污染用户的真实配置**（多实例共用一个 ini）。
+/// 旧名 `PIGO_CONFIG_DIR` 仍作为兜底，避免既有测试脚本失效。
 fn config_dir() -> String {
-    if let Ok(d) = std::env::var("PIGO_CONFIG_DIR") {
-        let d = d.trim().to_string();
-        if !d.is_empty() {
-            return d;
+    for k in ["PIPIE_CONFIG_DIR", "PIGO_CONFIG_DIR"] {
+        if let Ok(d) = std::env::var(k) {
+            let d = d.trim().to_string();
+            if !d.is_empty() {
+                return d;
+            }
         }
     }
     // ⚠️ 兼容自动化测试：测试实例都带 `RL_INSTANCE`（互斥体后缀）且以 `cwd=沙箱`
     //    启动、ini 就放沙箱里 —— 现有 20+ 个测试脚本全部依赖这个约定，
-    //    不认它就得逐个去改。要**显式**指定请用 `PIGO_CONFIG_DIR`。
+    //    不认它就得逐个去改。要**显式**指定请用 `PIPIE_CONFIG_DIR`。
     if std::env::var("RL_INSTANCE").map(|v| !v.is_empty()).unwrap_or(false) {
         return std::env::current_dir()
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_else(|_| exe_dir());
     }
     match std::env::var("APPDATA") {
-        Ok(a) if !a.trim().is_empty() => format!("{}\\pigo", a.trim().trim_end_matches('\\')),
+        Ok(a) if !a.trim().is_empty() => format!("{}\\PiPie", a.trim().trim_end_matches('\\')),
         _ => exe_dir(), // 极端兜底（APPDATA 都没了）
     }
 }
 
-/// 日志目录：`%LOCALAPPDATA%\pigo\logs`。
+/// 日志目录：`%LOCALAPPDATA%\PiPie\logs`。
 /// 日志**不漫游** —— 体积大、只对本机有意义（Roaming 会被域同步拖走）。
-/// 设了 `PIGO_CONFIG_DIR` 时日志也留在沙箱里，测试不往真实目录拉屎。
+/// 设了 `PIPIE_CONFIG_DIR` 时日志也留在沙箱里，测试不往真实目录拉屎。
 fn log_dir() -> String {
-    let overridden = std::env::var("PIGO_CONFIG_DIR")
-        .map(|d| !d.trim().is_empty())
-        .unwrap_or(false);
+    let overridden = ["PIPIE_CONFIG_DIR", "PIGO_CONFIG_DIR"].iter().any(|k| {
+        std::env::var(k)
+            .map(|d| !d.trim().is_empty())
+            .unwrap_or(false)
+    });
     if overridden {
         return config_dir();
     }
     match std::env::var("LOCALAPPDATA") {
         Ok(a) if !a.trim().is_empty() => {
-            format!("{}\\pigo\\logs", a.trim().trim_end_matches('\\'))
+            format!("{}\\PiPie\\logs", a.trim().trim_end_matches('\\'))
         }
         _ => config_dir(),
     }
@@ -7231,6 +7237,25 @@ fn migrate_legacy_config(dst_dir: &str) {
     let dst = format!("{}\\settings.ini", dst_dir);
     if std::path::Path::new(&dst).exists() {
         return;
+    }
+    // 改名（pigo → PiPie）后配置目录由 `%APPDATA%\pigo` 换成 `%APPDATA%\PiPie`。
+    // 只在「新目录还没有 ini」时复制一次；旧文件**保留**，用户可手动回滚/对比。
+    if let Ok(a) = std::env::var("APPDATA") {
+        let a = a.trim().trim_end_matches('\\');
+        if !a.is_empty() {
+            let old = format!("{}\\pigo\\settings.ini", a);
+            if !old.eq_ignore_ascii_case(&dst)
+                && std::path::Path::new(&old).exists()
+                && std::fs::copy(&old, &dst).is_ok()
+            {
+                let old_bak = format!("{}\\pigo\\settings.ini.bak", a);
+                if std::path::Path::new(&old_bak).exists() {
+                    let _ = std::fs::copy(&old_bak, format!("{}.bak", dst));
+                }
+                println!("[*] 旧版配置（pigo）已复制到 {}", dst);
+                return;
+            }
+        }
     }
     let src_dir = exe_dir();
     if src_dir.eq_ignore_ascii_case(dst_dir) {
@@ -10276,7 +10301,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     ni.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     ni.uCallbackMessage = WM_APP_TRAY;
     ni.hIcon = app_icon();
-    let tip: Vec<u16> = "pigo（Ctrl+Alt+R 开关监听）".encode_utf16().collect();
+    let tip: Vec<u16> = "PiPie（Ctrl+Alt+R 开关监听）".encode_utf16().collect();
     for (i, c) in tip.iter().enumerate().take(127) {
         ni.szTip[i] = *c;
     }
@@ -13601,7 +13626,7 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     s_draw_avatar_logo(st, S_X0 + 15, mc, 11);
 
     let tx = S_X0 + 38;
-    let name = "pigo";
+    let name = "PiPie";
     let nw = s_text_w(dc, name, st.sf_h1);
     g_text(dc, name, RECT { left: tx, top: cy, right: tx + nw + 4, bottom: cy + 28 },
         pal.ink, st.sf_h1, false);
@@ -13660,7 +13685,7 @@ unsafe fn s_paint_adv(st: &mut State, dc: HDC, pal: &Pal) {
     s_about_section(st, dc, pal, &mut cy, "运行信息", &info);
     let _ = cy;
 
-    g_text(dc, "© 2026 pigo · 配置只保存在本机",
+    g_text(dc, "© 2026 PiPie · 配置只保存在本机",
         RECT { left: S_X0, top: S_H - 64, right: S_X1, bottom: S_H - 28 },
         mixc(pal.paper, pal.ink, 0.4), st.sf_small, false);
 }
@@ -14535,7 +14560,7 @@ unsafe fn apply_theme(st: &mut State) {
 fn autostart_key() -> (Vec<u16>, Vec<u16>) {
     (
         wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run"),
-        wide("pigo"),
+        wide("PiPie"),
     )
 }
 
@@ -14563,7 +14588,7 @@ fn autostart_reg_exists() -> bool {
 ///
 /// ⚠️⚠️ **只在「该有却没有 / 不该有却有」时才动注册表**，绝不无脑覆写。
 /// 原因：自启项的值是 `"<当前进程 exe 路径>"`，而沙箱 / 测试跑的是
-/// `_tmptest\Pigo.exe` —— 一启动就把**用户真实的自启项改指到沙箱**去
+/// `_tmptest\PiPie.exe` —— 一启动就把**用户真实的自启项改指到沙箱**去
 /// （实测踩到：值被改成 `_tmptest`）。用「存在性差集」同步就完全避开了：
 /// 正常安装时值已存在且正确 → 一次都不写。
 fn autostart_sync(want: bool) {
@@ -14583,11 +14608,15 @@ fn autostart_drop_legacy() {
         RegCloseKey, RegDeleteValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE,
     };
     let (sub, _) = autostart_key();
-    let legacy: Vec<u16> = wide("RadialMenu");
+    // `RadialMenu` = 更早的名字；`pigo` = 改名为 PiPie 之前那一版。
+    // 不删的话用户会同时有两个自启项，而且旧项指向已经不存在的旧 exe 名。
+    let legacy_names = [wide("RadialMenu"), wide("pigo")];
     unsafe {
         let mut hk = HKEY::default();
         if RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(sub.as_ptr()), 0, KEY_SET_VALUE, &mut hk).is_ok() {
-            let _ = RegDeleteValueW(hk, PCWSTR(legacy.as_ptr()));
+            for legacy in &legacy_names {
+                let _ = RegDeleteValueW(hk, PCWSTR(legacy.as_ptr()));
+            }
             let _ = RegCloseKey(hk);
         }
     }
@@ -14949,8 +14978,9 @@ unsafe fn settings_dump(dir: &str, st: &mut State) {
 
 // ───────────────────── 在线升级（v1：查版本） ─────────────────────
 
-/// GitHub 最新 release API（Public 仓库可匿名读）。可用 `PIGO_UPDATE_URL` 覆盖以便本地演练。
-const UPDATE_API: &str = "https://api.github.com/repos/lifeFxxker/pigo/releases/latest";
+/// GitHub 最新 release API（Public 仓库可匿名读）。可用 `PIPIE_UPDATE_URL` 覆盖以便本地演练
+/// （旧名 `PIGO_UPDATE_URL` 仍作兜底，本地演练脚本不用改）。
+const UPDATE_API: &str = "https://api.github.com/repos/lifeFxxker/pipie/releases/latest";
 /// 自动检查的最小间隔（秒）：防 GitHub 匿名 API 限流（60 次/时/IP）。
 const UPDATE_MIN_INTERVAL: f64 = 6.0 * 3600.0;
 
@@ -15010,7 +15040,7 @@ fn http_get_raw_cb(
         HTTP_QUERY_CONTENT_LENGTH, HTTP_QUERY_FLAG_NUMBER, HTTP_QUERY_STATUS_CODE,
         INTERNET_FLAG_NO_CACHE_WRITE, INTERNET_FLAG_RELOAD, INTERNET_OPEN_TYPE_PRECONFIG,
     };
-    let agent = wide("pigo-updater");
+    let agent = wide("PiPie-updater");
     let target = wide(url);
     unsafe {
         let h = InternetOpenW(
@@ -15109,7 +15139,9 @@ static UPDATE_SUMS_URL: std::sync::Mutex<String> = std::sync::Mutex::new(String:
 static UPDATE_NEW_PATH: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 fn update_api_url() -> String {
-    std::env::var("PIGO_UPDATE_URL").unwrap_or_else(|_| UPDATE_API.to_string())
+    std::env::var("PIPIE_UPDATE_URL")
+        .or_else(|_| std::env::var("PIGO_UPDATE_URL"))
+        .unwrap_or_else(|_| UPDATE_API.to_string())
 }
 
 /// 从 release JSON 的 assets 数组里找名为 `want` 的资产，返回 browser_download_url。
@@ -15212,7 +15244,7 @@ fn check_update_sync() -> UpdateOutcome {
                     let latest = tag.trim_start_matches('v').to_string();
                     if version_gt(&latest, cur_version()) {
                         match (
-                            find_asset_url(&body, "Pigo.exe"),
+                            find_asset_url(&body, "PiPie.exe"),
                             find_asset_url(&body, "SHA256SUMS"),
                         ) {
                             (Some(exe_url), Some(sums_url)) => UpdateOutcome::Available {
@@ -15221,7 +15253,7 @@ fn check_update_sync() -> UpdateOutcome {
                                 sums_url,
                             },
                             _ => UpdateOutcome::Failed(
-                                "release 里缺 Pigo.exe 或 SHA256SUMS asset".into(),
+                                "release 里缺 PiPie.exe 或 SHA256SUMS asset".into(),
                             ),
                         }
                     } else {
@@ -15281,7 +15313,7 @@ fn start_update_check(st: &mut State, manual: bool) {
     });
 }
 
-/// 下载 + SHA256 校验 → `<exe 同目录>\.pigo-update.new`；完成后 post 状态（5 就绪 / 4 失败）。
+/// 下载 + SHA256 校验 → `<exe 同目录>\.pipie-update.new`；完成后 post 状态（5 就绪 / 4 失败）。
 /// 下载 exe + 取 SHA256SUMS + 校验 + 写入 `dest`（同步，阻塞）。供后台线程与诊断 CLI 共用。
 fn download_and_verify(exe_url: &str, sums_url: &str, dest: &str) -> Result<(), String> {
     let (code, bytes) = http_get_raw_cb(
@@ -15304,7 +15336,7 @@ fn download_and_verify(exe_url: &str, sums_url: &str, dest: &str) -> Result<(), 
     if s_code != 200 {
         return Err(format!("校验文件 HTTP {s_code}"));
     }
-    let want = parse_sums(&sums, "Pigo.exe").ok_or("SHA256SUMS 里没有 Pigo.exe")?;
+    let want = parse_sums(&sums, "PiPie.exe").ok_or("SHA256SUMS 里没有 PiPie.exe")?;
     let got = sha256_hex(&bytes).ok_or("SHA256 计算失败")?;
     if got != want {
         return Err(format!("校验不符（期望 {want}，实际 {got}）"));
@@ -15327,7 +15359,7 @@ fn start_download(st: &mut State) {
     st.update_st = 6;
     st.update_msg.clear();
     UPDATE_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
-    let new_path = format!("{}\\.pigo-update.new", exe_dir());
+    let new_path = format!("{}\\.pipie-update.new", exe_dir());
     unsafe { save_settings(st) };
     std::thread::spawn(move || {
         let result = download_and_verify(&exe_url, &sums_url, &new_path);
@@ -15357,7 +15389,7 @@ fn apply_update(st: &mut State) {
         return;
     }
     let exe = exe_path();
-    let updater = format!("{}\\.pigo-updater.exe", exe_dir());
+    let updater = format!("{}\\.pipie-updater.exe", exe_dir());
     if std::fs::copy(&exe, &updater).is_err() {
         st.update_st = 4;
         st.update_msg = "无法创建 updater（目录不可写？便携版请放到用户目录）".into();
@@ -15502,7 +15534,7 @@ fn main() {
         return;
     }
     if args.len() >= 3 && args[1] == "--update-fetch" {
-        // 诊断：检查 + 下载 + 校验（同步），把新 exe 落到 <dir>\Pigo.exe。端到端演练用。
+        // 诊断：检查 + 下载 + 校验（同步），把新 exe 落到 <dir>\PiPie.exe。端到端演练用。
         let dir = args[2].clone();
         match check_update_sync() {
             UpdateOutcome::Available {
@@ -15510,7 +15542,7 @@ fn main() {
                 exe_url,
                 sums_url,
             } => {
-                let dest = format!("{dir}\\Pigo.exe");
+                let dest = format!("{dir}\\PiPie.exe");
                 match download_and_verify(&exe_url, &sums_url, &dest) {
                     Ok(()) => println!("[update] 下载并校验通过 v{latest} → {dest}"),
                     Err(e) => {
@@ -15695,7 +15727,7 @@ fn main() {
         }
     }
 
-    // ── 输入卡顿诊断：看门狗线程 + 日志（LocalAppData\pigo\logs）──
+    // ── 输入卡顿诊断：看门狗线程 + 日志（LocalAppData\PiPie\logs）──
     // 排查「闲置后鼠标卡 30 秒」：HOOK_SLOW=我们的钩子回调慢；
     // WATCHDOG_GAP=我们整个进程被冻结（待机/换页）；两者都干净=卡在别处。
     {
@@ -15886,7 +15918,7 @@ fn main() {
         // 而正常使用时不要设（否则能开出好几份，钩子会打架）。
         let suffix = std::env::var("RL_INSTANCE").unwrap_or_default();
         let mname: Vec<u16> = wide(&format!(
-            "Global\\pigo_SingleInstance_v1{}",
+            "Global\\PiPie_SingleInstance_v1{}",
             suffix
         ));
         let h = CreateMutexW(None, BOOL(0), PCWSTR(mname.as_ptr()));
@@ -15900,7 +15932,7 @@ fn main() {
             let host_cls: Vec<u16> = wide("RLHost");
             let live = FindWindowW(PCWSTR(host_cls.as_ptr()), PCWSTR::null()).is_ok();
             if live {
-                eprintln!("[!] pigo 已在运行，本次启动已取消。");
+                eprintln!("[!] PiPie 已在运行，本次启动已取消。");
                 return;
             }
             eprintln!("[*] 检测到残留互斥体（无存活实例），已忽略并继续启动。");
@@ -15918,8 +15950,8 @@ fn main() {
         load_ini(&mut st);
         read_persistent(&mut st);
         // 更新残留清理：updater 用完的副本 / 已应用的新版本临时文件
-        // （新 pigo 由 updater 拉起时顺手删；updater 可能还没完全退出，删不掉就下次再来）
-        for f in [".pigo-updater.exe", ".pigo-update.new"] {
+        // （新 PiPie 由 updater 拉起时顺手删；updater 可能还没完全退出，删不掉就下次再来）
+        for f in [".pipie-updater.exe", ".pipie-update.new"] {
             let _ = std::fs::remove_file(format!("{}\\{}", exe_dir(), f));
         }
         // 开机自启：**ini 是唯一真相**（缺省 = 开）→ 启动时把注册表同步过去，
@@ -16066,7 +16098,7 @@ fn main() {
             st.hide_at = now_s() + REVEAL_SECS;
         }
 
-        println!("[*] pigo 已就绪：{} · 托盘菜单 / Ctrl+Alt+R 开关监听", about_hotkeys(&st));
+        println!("[*] PiPie 已就绪：{} · 托盘菜单 / Ctrl+Alt+R 开关监听", about_hotkeys(&st));
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {

@@ -15,13 +15,13 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "pigo"
-      VALUE "FileDescription", "pigo"
+      VALUE "CompanyName", "PiPie"
+      VALUE "FileDescription", "PiPie"
       VALUE "FileVersion", "1.0.0"
-      VALUE "InternalName", "pigo"
-      VALUE "LegalCopyright", "Copyright (C) 2026 pigo"
-      VALUE "OriginalFilename", "Pigo.exe"
-      VALUE "ProductName", "pigo"
+      VALUE "InternalName", "PiPie"
+      VALUE "LegalCopyright", "Copyright (C) 2026 PiPie"
+      VALUE "OriginalFilename", "PiPie.exe"
+      VALUE "ProductName", "PiPie"
       VALUE "ProductVersion", "1.0.0"
     END
   END

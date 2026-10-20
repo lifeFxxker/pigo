@@ -1,18 +1,18 @@
 [package]
-name = "pigo"
+name = "pipie"
 version = "1.0.2"
 edition = "2021"
 description = "A radial (pie-menu) app launcher for Windows with live window previews"
-authors = ["pigo"]
+authors = ["PiPie"]
 license-file = "LICENSE"
-repository = "https://github.com/lifeFxxker/pigo"
-homepage = "https://github.com/lifeFxxker/pigo"
+repository = "https://github.com/lifeFxxker/pipie"
+homepage = "https://github.com/lifeFxxker/pipie"
 readme = "README.md"
 keywords = ["launcher", "radial", "windows", "productivity", "pie-menu"]
 categories = ["gui", "command-line-utilities"]
 
 [[bin]]
-name = "Pigo"
+name = "PiPie"
 path = "src/main.rs"
 
 [dependencies]

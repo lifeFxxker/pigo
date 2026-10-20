@@ -3,10 +3,10 @@
 
 用法（在项目根目录）：python package.py
 产物：
-  dist/Pigo.exe                主程序（单文件）
+  dist/PiPie.exe               主程序（单文件）
   dist/README.txt              用法说明
   dist/SHA256SUMS              校验清单（在线升级的独立 release asset，不进 zip）
-  dist/pigo-v<版本>-win64.zip        可直接发给别人
+  dist/pipie-v<版本>-win64.zip        可直接发给别人
 
 ⚠️ 打包前请确认没有实例在跑 —— 正在运行的 exe 被系统锁着，覆盖会失败
 （报 "Device or resource busy" / "另一个程序正在使用此文件"）。
@@ -22,8 +22,8 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, 'dist')
-BUILT = os.path.join(HERE, 'target', 'release', 'Pigo.exe')
-NAME = 'Pigo.exe'
+BUILT = os.path.join(HERE, 'target', 'release', 'PiPie.exe')
+NAME = 'PiPie.exe'
 VERSION = '1.0.2'
 
 
@@ -85,7 +85,7 @@ def main():
         print('（dist/README.txt 不存在，跳过）')
 
     print('=== 4/4 打 zip ===', flush=True)
-    zname = 'pigo-v%s-win64.zip' % VERSION
+    zname = 'pipie-v%s-win64.zip' % VERSION
     zpath = os.path.join(DIST, zname)
     # ⚠️⚠️ 只能打**白名单**，绝不能 `sorted(os.listdir(DIST))`！
     # 之前只要在 `dist/` 里跑过程序，运行时留下的 `settings.ini`
