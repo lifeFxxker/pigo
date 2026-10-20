@@ -1,7 +1,7 @@
-# pigo
+# PiPie
 
 <p align="left">
-  <a href="https://github.com/lifeFxxker/pigo/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pigo?color=black&label=release" alt="Release"></a>
+  <a href="https://github.com/lifeFxxker/pipie/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pipie?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
   <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
@@ -42,13 +42,13 @@ Hover an app to fan out its open windows; hold and drag an inner tile to reorder
 - **Built-in actions** — e.g. `@act:start` opens the Windows Start menu directly.
 - **Flexible invocation** — A side button by default; switch to the middle button, long-press right button, or a recorded key combo such as `Ctrl+W`.
 - **Resident & autostart** — Optionally start at login and live in the tray.
-- **Single file, zero dependencies** — The build output is one `Pigo.exe` (≈700 KB); no .NET or other runtime is required.
+- **Single file, zero dependencies** — The build output is one `PiPie.exe` (≈700 KB); no .NET or other runtime is required.
 
 ## Installation
 
 ### Download
 
-Grab the latest `pigo-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pigo/releases) page, unzip it anywhere, and run `Pigo.exe`.
+Grab the latest `pipie-vX.Y.Z-win64.zip` from the [Releases](https://github.com/lifeFxxker/pipie/releases) page, unzip it anywhere, and run `PiPie.exe`.
 
 > If no release is published yet, build it locally (below).
 
@@ -63,7 +63,7 @@ Grab the latest `pigo-vX.Y.Z-win64.zip` from the [Releases](https://github.com/l
 
 ```bash
 cargo build --release
-# -> target/release/Pigo.exe
+# -> target/release/PiPie.exe
 ```
 
 > **Keep `lto = "thin"` in `Cargo.toml`.** Do not switch to fat LTO (`"true"`): the current toolchain miscompiles this project's `unsafe` FFI and the app crashes on launch (`0xC0000409`).
@@ -72,7 +72,7 @@ Package a single-file zip:
 
 ```bash
 python package.py
-# -> dist/Pigo.exe  and  dist/pigo-v1.0.0-win64.zip
+# -> dist/PiPie.exe  and  dist/pipie-v1.0.0-win64.zip
 ```
 
 ## Usage
@@ -85,7 +85,7 @@ python package.py
 
 ## Configuration
 
-Configuration lives in `%APPDATA%\pigo\settings.ini`, created on first run and normally edited through the in-app Settings page. Logs are written to `%LOCALAPPDATA%\pigo\logs\`.
+Configuration lives in `%APPDATA%\PiPie\settings.ini`, created on first run and normally edited through the in-app Settings page. Logs are written to `%LOCALAPPDATA%\PiPie\logs\`.
 
 ## How it works
 
@@ -107,7 +107,7 @@ design/preview-*.png   Screenshots used by the README
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 pigo
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 PiPie
 
 **Noncommercial use only.** Personal study, research, private entertainment, and
 modification are permitted. Commercial use requires a separate license from the author.

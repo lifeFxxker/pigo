@@ -1,7 +1,7 @@
-# pigo
+# PiPie
 
 <p align="left">
-  <a href="https://github.com/lifeFxxker/pigo/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pigo?color=black&label=release" alt="Release"></a>
+  <a href="https://github.com/lifeFxxker/pipie/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pipie?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
   <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
@@ -42,13 +42,13 @@ Windows 平台的光标居中径向启动器。按鼠标侧键在光标处呼出
 - **内置动作** —— 例如 `@act:start`，直接打开 Windows 开始菜单。
 - **多种呼出方式** —— 默认鼠标侧键，另可换中键、长按右键，或录制一个组合键（如 `Ctrl+W`）。
 - **常驻与开机自启** —— 可设为登录时启动，常驻托盘。
-- **单文件、零依赖** —— 构建产物只有一个 `Pigo.exe`（约 700 KB），不需要 .NET 或其它运行时。
+- **单文件、零依赖** —— 构建产物只有一个 `PiPie.exe`（约 700 KB），不需要 .NET 或其它运行时。
 
 ## 安装
 
 ### 下载
 
-从 [Releases](https://github.com/lifeFxxker/pigo/releases) 页下载最新的 `pigo-vX.Y.Z-win64.zip`，解压到任意目录，运行 `Pigo.exe` 即可。
+从 [Releases](https://github.com/lifeFxxker/pipie/releases) 页下载最新的 `pipie-vX.Y.Z-win64.zip`，解压到任意目录，运行 `PiPie.exe` 即可。
 
 > 若尚无 Release，可自行本地构建（见下）。
 
@@ -63,7 +63,7 @@ Windows 平台的光标居中径向启动器。按鼠标侧键在光标处呼出
 
 ```bash
 cargo build --release
-# -> target/release/Pigo.exe
+# -> target/release/PiPie.exe
 ```
 
 > **务必保留 `Cargo.toml` 中的 `lto = "thin"`。** 不要改成 fat LTO（`"true"`）：当前工具链会错误编译本项目的 `unsafe` FFI，导致启动即崩溃（`0xC0000409`）。
@@ -72,7 +72,7 @@ cargo build --release
 
 ```bash
 python package.py
-# -> dist/Pigo.exe  与  dist/pigo-v1.0.0-win64.zip
+# -> dist/PiPie.exe  与  dist/pipie-v1.0.0-win64.zip
 ```
 
 ## 使用
@@ -85,7 +85,7 @@ python package.py
 
 ## 配置
 
-配置位于 `%APPDATA%\pigo\settings.ini`，首次运行自动创建，通常通过应用内设置页编辑即可。日志写入 `%LOCALAPPDATA%\pigo\logs\`。
+配置位于 `%APPDATA%\PiPie\settings.ini`，首次运行自动创建，通常通过应用内设置页编辑即可。日志写入 `%LOCALAPPDATA%\PiPie\logs\`。
 
 ## 实现原理
 
@@ -107,7 +107,7 @@ design/preview-*.png   README 使用的截图
 
 ## 许可证
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 pigo
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 PiPie
 
 **禁止商业用途**；允许个人学习、研究、私人娱乐与改动（详见 LICENSE）。
 需要商用请先联系作者获得单独授权。
