@@ -4,12 +4,12 @@
   <a href="https://github.com/lifeFxxker/pigo/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pigo?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
-  <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
+  <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
 </p>
 
 **[English](README.en.md) · [简体中文](README.md)**
 
-A radial app launcher for Windows. Summon a cursor-centered dial with the middle mouse button, pin your frequently used apps to the inner ring, and hover an app to fan out its open windows on the outer ring — with a live window preview. One native executable, no runtime, no installer.
+A radial app launcher for Windows. Summon a cursor-centered dial with a mouse side button, pin your frequently used apps to the inner ring, and hover an app to fan out its open windows on the outer ring — with a live window preview. One native executable, no runtime, no installer.
 
 ---
 
@@ -40,7 +40,7 @@ Hover an app to fan out its open windows; hold and drag an inner tile to reorder
 - **Running indicators** — Apps with an open window show a small dot beneath their icon.
 - **Liquid-glass material** — A subtle glass finish on the dial only; the settings page stays flat paper for readability.
 - **Built-in actions** — e.g. `@act:start` opens the Windows Start menu directly.
-- **Flexible invocation** — Middle mouse button, a side button, long-press right button, or a recorded key combo such as `Ctrl+W`.
+- **Flexible invocation** — A side button by default; switch to the middle button, long-press right button, or a recorded key combo such as `Ctrl+W`.
 - **Resident & autostart** — Optionally start at login and live in the tray.
 - **Single file, zero dependencies** — The build output is one `Pigo.exe` (≈700 KB); no .NET or other runtime is required.
 
@@ -77,7 +77,7 @@ python package.py
 
 ## Usage
 
-- **Invoke** — Hold the **middle mouse button** (or a side button) to pop the dial at the cursor. Release to launch the highlighted app; press `Esc` or any other key to cancel. Switch to long-press right button or a custom combo in Settings.
+- **Invoke** — Press the **mouse side button** (default; the middle button can be enabled in Settings) to pop the dial at the cursor. Release to launch the highlighted app; press `Esc` or any other key to cancel. Long-press right button or a custom combo are also available.
 - **Pin an app** — Drag a shortcut, `.exe`, folder, or file onto an inner tile.
 - **Add a window** — Drag a window onto the dial to group it under its app; it then appears on that app's outer ring.
 - **Preview** — Hover an app to fan out its windows; hover a window capsule for a live preview.
@@ -107,4 +107,7 @@ design/preview-*.png   Screenshots used by the README
 
 ## License
 
-[MIT](LICENSE) © 2026 pigo
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 pigo
+
+**Noncommercial use only.** Personal study, research, private entertainment, and
+modification are permitted. Commercial use requires a separate license from the author.

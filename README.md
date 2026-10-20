@@ -4,12 +4,12 @@
   <a href="https://github.com/lifeFxxker/pigo/releases"><img src="https://img.shields.io/github/v/release/lifeFxxker/pigo?color=black&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-1f1f1f" alt="Platform">
   <img src="https://img.shields.io/badge/language-Rust-1f1f1f" alt="Rust">
-  <img src="https://img.shields.io/badge/license-MIT-1f1f1f" alt="License">
+  <img src="https://img.shields.io/badge/license-NonCommercial-1f1f1f" alt="License">
 </p>
 
 **[English](README.en.md) · [简体中文](README.md)**
 
-Windows 平台的光标居中径向启动器。按住鼠标中键在光标处呼出轮盘，把常用应用钉在内环，悬停应用即在其身侧展开该应用的窗口，并显示实时窗口预览。单个原生可执行文件，无运行时、无安装程序。
+Windows 平台的光标居中径向启动器。按鼠标侧键在光标处呼出轮盘，把常用应用钉在内环，悬停应用即在其身侧展开该应用的窗口，并显示实时窗口预览。单个原生可执行文件，无运行时、无安装程序。
 
 ---
 
@@ -40,7 +40,7 @@ Windows 平台的光标居中径向启动器。按住鼠标中键在光标处呼
 - **运行中标识** —— 有窗口打开的应用，图标下方会显示一个小圆点。
 - **液态玻璃材质** —— 只在轮盘上做很淡的玻璃质感；设置页保持纸面，保证可读性。
 - **内置动作** —— 例如 `@act:start`，直接打开 Windows 开始菜单。
-- **多种呼出方式** —— 鼠标中键、侧键、长按右键，或录制一个组合键（如 `Ctrl+W`）。
+- **多种呼出方式** —— 默认鼠标侧键，另可换中键、长按右键，或录制一个组合键（如 `Ctrl+W`）。
 - **常驻与开机自启** —— 可设为登录时启动，常驻托盘。
 - **单文件、零依赖** —— 构建产物只有一个 `Pigo.exe`（约 700 KB），不需要 .NET 或其它运行时。
 
@@ -77,7 +77,7 @@ python package.py
 
 ## 使用
 
-- **呼出** —— 按住**鼠标中键**（或侧键）在光标处弹出轮盘。松开即启动高亮的应用，按 `Esc` 或任意其它键取消。可在设置中改为长按右键或自定义组合键。
+- **呼出** —— 按**鼠标侧键**（默认，可在设置改为中键）在光标处弹出轮盘。松开即启动高亮的应用，按 `Esc` 或任意其它键取消。也可设为长按右键或自定义组合键。
 - **固定应用** —— 把快捷方式、`.exe`、文件夹或文件拖到内环磁贴上。
 - **添加窗口** —— 把一个窗口拖到轮盘上，归到它所属的应用下；之后会出现在该应用的外环。
 - **预览** —— 悬停应用展开它的窗口；悬停窗口胶囊显示实时预览。
@@ -107,4 +107,7 @@ design/preview-*.png   README 使用的截图
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 pigo
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 pigo
+
+**禁止商业用途**；允许个人学习、研究、私人娱乐与改动（详见 LICENSE）。
+需要商用请先联系作者获得单独授权。
