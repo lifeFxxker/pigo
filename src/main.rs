@@ -22,7 +22,7 @@
 
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU8, AtomicU32, Ordering};
 use std::time::Instant;
 
 use windows::core::PCWSTR;
@@ -718,6 +718,10 @@ struct State {
     glass_liquid: bool,
     /// 材质 = 液态玻璃（外观页可选；ini `glass=`）。玻璃不可用（抓屏失败）会退回纸面。
     glass: bool,
+    /// 玻璃背景实时刷新（ini `glass_live=`，缺省开）。关掉 = 只抓呼出那一刻的快照，
+    /// 好处是**录屏/截图里能看到轮盘**（实时刷新靠 `WDA_EXCLUDEFROMCAPTURE` 把自己
+    /// 排除出抓屏，见 `glass_live_start`）。
+    glass_live: bool,
     /// 抓屏 + 模糊后的桌面快照（`CANVAS²×4` BGRA，无预乘）。
     /// **两块拼一起**：`[0..n]` = 抓到的原图、`[n..2n]` = 模糊图（`n = CANVAS²×4`）。
     /// 每个内环应用"是否正在运行"（图标下方那个小圆点）。呼出时算一次。
@@ -1042,6 +1046,7 @@ impl State {
             app_running: [false; MAX_APPS],
             app_hwnd: [0; MAX_APPS],
             glass: true,
+            glass_live: true,
             glass_bg: Vec::new(),
             running: false,
             persistent: true,
@@ -2304,26 +2309,202 @@ unsafe fn snap_glass(st: &mut State, x: i32, y: i32) {
     if !ok {
         return;
     }
-    // 全黑（平均亮度 ≈ 0）→ 判失败。受保护窗口（DRM 视频 / 银行客户端）就这样，
-    // 与其显示一块黑玻璃，不如老老实实回到纸面。
-    let mut sum = 0u64;
-    let mut cnt = 0u64;
-    for i in (0..n).step_by(4 * 61) {
-        sum += (raw[i] as u64 + raw[i + 1] as u64 + raw[i + 2] as u64) / 3;
-        cnt += 1;
-    }
-    if cnt == 0 || sum / cnt < 4 {
+    if mostly_black(&raw) {
         return;
     }
     let t0 = std::time::Instant::now();
-    // 一块 Vec 存两层：原图在前、模糊图在后（`glass_px` 要同时采样两层）
-    let mut buf = Vec::with_capacity(raw.len() * 2);
-    buf.extend_from_slice(&raw);
-    buf.extend_from_slice(&blur_glass(&raw));
-    st.glass_bg = buf;
+    st.glass_bg = build_glass(&raw);
     // 只在需要时看：抓屏 + 模糊一共多久（菜单是"按下就出"，这段延迟用户能感觉到）
     if std::env::var_os("RL_GLASSDBG").is_some() {
         eprintln!("[glass] snap {}x{} at ({},{}) blur+blit = {:?}", CANVAS, CANVAS, x, y, t0.elapsed());
+    }
+}
+
+/// 全黑（平均亮度 ≈ 0）→ 判失败。受保护窗口（DRM 视频 / 银行客户端）就这样，
+/// 与其显示一块黑玻璃，不如老老实实回到纸面 / 上一帧。
+fn mostly_black(raw: &[u8]) -> bool {
+    let mut sum = 0u64;
+    let mut cnt = 0u64;
+    for i in (0..raw.len().saturating_sub(3)).step_by(4 * 61) {
+        sum += (raw[i] as u64 + raw[i + 1] as u64 + raw[i + 2] as u64) / 3;
+        cnt += 1;
+    }
+    cnt == 0 || sum / cnt < 4
+}
+
+/// 一块 Vec 存两层：原图在前、模糊图在后（`glass_px` 要同时采样两层）
+fn build_glass(raw: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(raw.len() * 2);
+    buf.extend_from_slice(raw);
+    buf.extend_from_slice(&blur_glass(raw));
+    buf
+}
+
+/// 调试用：把抓到的 BGRA 写成 PPM（`RL_GLASSDUMP=<前缀>` 时才调）。
+fn dump_ppm(path: &str, w: usize, h: usize, bgra: &[u8]) {
+    let mut out = Vec::with_capacity(w * h * 3 + 32);
+    out.extend_from_slice(format!("P6\n{} {}\n255\n", w, h).as_bytes());
+    for px in bgra.chunks_exact(4) {
+        out.extend_from_slice(&[px[2], px[1], px[0]]);
+    }
+    let _ = std::fs::write(path, out);
+}
+
+// ───────────────────── 实时玻璃 ─────────────────────
+//
+// Windows 没有给「自绘的圆形窗口」任何实时背景 API：DWM 的亚克力/云母只对矩形
+// 窗口生效，`DwmEnableBlurBehindWindow` 在 Win8+ 已经不模糊了。所以只能在菜单
+// 显示期间，隔一会儿把桌面那一块重抓一次。
+//
+// 难点是「窗口正显示着」：直接抓会把自己拍进去（实测 Win11 上不带 CAPTUREBLT
+// 也照样拍到分层窗口）。解法是 `WDA_EXCLUDEFROMCAPTURE` —— 把轮盘窗口标记成
+// **不参与抓屏**，GDI 的 BitBlt 就拍不到它了（带 CAPTUREBLT 也拍不到）。
+// ⚠️ 代价：轮盘打开时**录屏 / 截图里也看不见它**。要录宣传片就把 ini 的
+//    `glass_live=0`（录完再打开）。
+//
+// ⚠️⚠️ 抓屏必须放**后台线程**：屏幕 BitBlt 每次都会等到 DWM 下一次合成
+//    （≈16ms 阻塞，真正 CPU 只有 0.5ms @475²）。挂在 UI 的 16ms 帧定时器上
+//    会把菜单拖到 30fps 以下。
+
+/// 重抓间隔（ms）。30fps 足够让玻璃里的视频/滚动"活着"；再快只会多等几次合成。
+const GLASS_LIVE_MS: u64 = 33;
+
+static GLASS_LIVE_ON: AtomicBool = AtomicBool::new(false);
+static GLASS_LIVE_X: AtomicI32 = AtomicI32::new(0);
+static GLASS_LIVE_Y: AtomicI32 = AtomicI32::new(0);
+/// UI 线程取走了多少帧（只给 `RL_GLASSDBG` 的日志用）
+static GLASS_LIVE_TAKEN: AtomicU32 = AtomicU32::new(0);
+/// 最新一帧（UI 线程 `take` 走，直接换进 `glass_bg`，不拷贝）
+static GLASS_LIVE_SLOT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
+/// 菜单关着时把线程**挂起**（不是 12ms 轮询）：空闲时 0 唤醒、0 CPU，
+/// 也不妨碍系统进低功耗状态。
+static GLASS_LIVE_PARK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static GLASS_LIVE_WAKE: std::sync::Condvar = std::sync::Condvar::new();
+
+/// 后台抓屏线程。菜单关着时挂在条件变量上，不占 CPU、不占显存。
+fn glass_live_spawn() {
+    std::thread::spawn(|| unsafe {
+        let n = (CANVAS * CANVAS * 4) as usize;
+        let dbg = std::env::var_os("RL_GLASSDBG").is_some();
+        let dump = std::env::var("RL_GLASSDUMP").ok();
+        let mut dump_i = 0u32;
+        let mut dib: Option<(*mut u8, HDC, HBITMAP)> = None;
+        let mut on_since: Option<Instant> = None;
+        let (mut stat_n, mut stat_blit_us, mut stat_blur_us) = (0u32, 0u64, 0u64);
+        loop {
+            if !GLASS_LIVE_ON.load(Ordering::Relaxed) {
+                if let Some((_, mdc, bmp)) = dib.take() {
+                    let _ = DeleteObject(HGDIOBJ(bmp.0));
+                    let _ = DeleteDC(mdc);
+                }
+                on_since = None;
+                // 挂起。锁里复查一次：`glass_live_start` 也是在锁里置位的，不会漏唤醒。
+                let guard = GLASS_LIVE_PARK.lock().unwrap_or_else(|e| e.into_inner());
+                if !GLASS_LIVE_ON.load(Ordering::Relaxed) {
+                    let _ = GLASS_LIVE_WAKE.wait_timeout(guard, std::time::Duration::from_millis(500));
+                }
+                continue;
+            }
+            if on_since.is_none() {
+                on_since = Some(Instant::now());
+                dump_i = 0;
+                if let Ok(mut s) = GLASS_LIVE_SLOT.lock() {
+                    *s = None;
+                }
+            }
+            if dib.is_none() {
+                let (bits, mdc, bmp) = make_dib(CANVAS, CANVAS);
+                if bits.is_null() || mdc.is_invalid() || bmp.is_invalid() {
+                    GLASS_LIVE_ON.store(false, Ordering::Relaxed);
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    continue;
+                }
+                dib = Some((bits, mdc, bmp));
+            }
+            let t_tick = Instant::now();
+            // WDA 生效要过一帧合成：刚打开的头 40ms 不抓，免得把轮盘自己拍进去
+            if on_since.map(|t| t.elapsed().as_millis() as u64 >= 40).unwrap_or(false) {
+                let (bits, mdc, _) = dib.unwrap();
+                let x = GLASS_LIVE_X.load(Ordering::Relaxed);
+                let y = GLASS_LIVE_Y.load(Ordering::Relaxed);
+                let sdc = GetDC(None);
+                if !sdc.is_invalid() {
+                    let t0 = Instant::now();
+                    if BitBlt(mdc, 0, 0, CANVAS, CANVAS, sdc, x, y, SRCCOPY | CAPTUREBLT).is_ok() {
+                        // ⚠️ 这一段包含「等 DWM 下一次合成」（≈16ms），不是 CPU 耗时
+                        let t1 = Instant::now();
+                        let raw = std::slice::from_raw_parts(bits, n);
+                        // 抓失败（受保护窗口全黑）→ 不发，UI 留着上一帧
+                        if !mostly_black(raw) {
+                            let buf = build_glass(raw);
+                            let t2 = Instant::now();
+                            if let Ok(mut s) = GLASS_LIVE_SLOT.lock() {
+                                *s = Some(buf);
+                            }
+                            dump_i += 1;
+                            if let Some(p) = &dump {
+                                if matches!(dump_i, 1 | 13 | 25 | 37) {
+                                    dump_ppm(&format!("{}-{:02}.ppm", p, dump_i),
+                                             CANVAS as usize, CANVAS as usize, raw);
+                                }
+                            }
+                            stat_n += 1;
+                            stat_blit_us += t1.duration_since(t0).as_micros() as u64;
+                            stat_blur_us += t2.duration_since(t1).as_micros() as u64;
+                            if dbg && stat_n >= 30 {
+                                eprintln!("[glass] live blit {}us blur {}us / 30 frames, ui took {}",
+                                          stat_blit_us / 30, stat_blur_us / 30,
+                                          GLASS_LIVE_TAKEN.load(Ordering::Relaxed));
+                                stat_n = 0;
+                                stat_blit_us = 0;
+                                stat_blur_us = 0;
+                            }
+                        }
+                    }
+                    let _ = ReleaseDC(None, sdc);
+                }
+            }
+            // 补足到 33ms 一拍。BitBlt 本身就阻塞了 ~16ms，别在这上面再加 33
+            let el = t_tick.elapsed().as_millis() as u64;
+            if el < GLASS_LIVE_MS {
+                std::thread::sleep(std::time::Duration::from_millis(GLASS_LIVE_MS - el));
+            }
+        }
+    });
+}
+
+unsafe fn glass_live_start(st: &State, hwnd: HWND) {
+    if !st.glass || !st.glass_live || hwnd.is_invalid() {
+        return;
+    }
+    // 轮盘窗口不参与抓屏 —— 实时抓背景时就不会把自己拍进去。
+    // ⚠️ 老系统（< Win10 2004）没有 WDA_EXCLUDEFROMCAPTURE：设失败就别开实时，
+    //    否则每帧都拍到「玻璃里套着一圈自己」。
+    if SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_err() {
+        return;
+    }
+    GLASS_LIVE_X.store(st.win_x, Ordering::Relaxed);
+    GLASS_LIVE_Y.store(st.win_y, Ordering::Relaxed);
+    // 别把上一轮（可能已关菜单）的残留帧喂给这一次
+    if let Ok(mut s) = GLASS_LIVE_SLOT.lock() {
+        *s = None;
+    }
+    {
+        // 置位必须在 park 锁里：后台线程是「拿锁 → 复查标志 → 挂起」的顺序
+        let _g = GLASS_LIVE_PARK.lock().unwrap_or_else(|e| e.into_inner());
+        GLASS_LIVE_ON.store(true, Ordering::SeqCst);
+    }
+    GLASS_LIVE_WAKE.notify_all();
+}
+
+unsafe fn glass_live_stop(hwnd: HWND) {
+    GLASS_LIVE_ON.store(false, Ordering::SeqCst);
+    if let Ok(mut s) = GLASS_LIVE_SLOT.lock() {
+        *s = None;
+    }
+    // 撤掉「排除抓屏」：不然用户之后的录屏/截图里，轮盘这个窗口的位置一直是个洞
+    if !hwnd.is_invalid() {
+        let _ = SetWindowDisplayAffinity(hwnd, WDA_NONE);
     }
 }
 
@@ -7396,6 +7577,9 @@ unsafe fn read_persistent(st: &mut State) {
             } else if let Some(v) = get("glass=") {
                 // 缺省 = 关（纸面）—— 玻璃要看桌面，不是所有人的壁纸都撑得住
                 st.glass = v != "0";
+            } else if let Some(v) = get("glass_live=") {
+                // 缺省 = 开。关掉才能把「轮盘」录进宣传片（见 `glass_live_start`）
+                st.glass_live = v != "0";
             } else if let Some(v) = get("key_side=") {
                 st.key_side = v != "0";
             } else if let Some(v) = get("key_rhold=") {
@@ -10986,6 +11170,19 @@ unsafe fn on_timer(st: &mut State) {
         hide_menu(st);
     }
 
+    // 实时玻璃：后台线程抓到的新帧换进来（Vec 直接 move，没有拷贝）。
+    // 抓失败时槽里是空的 → 留着上一帧，不会闪回旧桌面。
+    if st.glass && st.glass_live {
+        if let Ok(mut s) = GLASS_LIVE_SLOT.lock() {
+            if let Some(buf) = s.take() {
+                // ⚠️ 不要在这里 `moving = true`：OLE 拖放期间是故意停连续重绘的
+                // （线程要随时应答 DragOver，见上面的说明）。下一帧自然用新图。
+                st.glass_bg = buf;
+                GLASS_LIVE_TAKEN.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
     let animating = st.hiding || entering_anim || moving;
     if animating {
         let ft0 = GetTickCount();
@@ -11143,6 +11340,8 @@ unsafe fn show_menu(st: &mut State, sx: i32, sy: i32) {
         CANVAS,
         SWP_NOACTIVATE | SWP_SHOWWINDOW,
     );
+    // 窗口已经显示 → 从这一刻起后台线程每 33ms 重抓一次背景（首帧快照仍是上面那张）
+    glass_live_start(st, hwnd);
     let mh = MAIN_HWND.load(Ordering::Relaxed);
     if mh != 0 {
         let _ = SetTimer(HWND(mh as *mut c_void), TIMER_FRAME, 16, None);
@@ -11172,6 +11371,10 @@ unsafe fn trim_working_set() {
 
 unsafe fn close_menu_now(st: &mut State) {
     MENU_OPEN.store(false, Ordering::SeqCst);
+    // 实时玻璃：先停后台抓屏，再撤掉「排除抓屏」—— 用户之后的录屏/截图里
+    // 不能因为我们开过菜单就少了这个窗口
+    let rh = RING_HWND.load(Ordering::Relaxed);
+    glass_live_stop(HWND(rh as *mut c_void));
     // 玻璃快照只服务于"这次呼出"，收起就还回去（900KB）。下次呼出重新抓 —— 3.5ms。
     // 常驻模式下菜单一直开着，自然一直留着。
     if !st.glass_bg.is_empty() {
@@ -13183,8 +13386,12 @@ unsafe fn s_paint_look(st: &mut State, dc: HDC, pal: &Pal) {
         let on = st.glass == (i == 1);
         g_chip(dc, pal, r, on, mats[i], st.sf_body, hov(st, Ctl::Mat(i)));
     }
-    // 一句说明（玻璃的真实限制：背景是**呼出那一刻**的快照）
-    let hint = "玻璃会透出呼出时的桌面；抓屏不可用（受保护窗口）会自动回到纸面";
+    // 一句说明（玻璃的真实限制：实时刷新靠「把自己排除出抓屏」，录屏里就看不见轮盘）
+    let hint = if st.glass_live {
+        "玻璃实时透出桌面；打开时轮盘不会被录屏/截图拍到"
+    } else {
+        "玻璃会透出呼出时的桌面；抓屏不可用（受保护窗口）会自动回到纸面"
+    };
     let hy = LOOK_MAT_Y + ACT_CHIPS_H + 14;
     g_text(dc, hint, RECT { left: S_X0, top: hy, right: S_X1, bottom: hy + 20 },
         mixc(pal.paper, pal.ink, 0.42), st.sf_small, false);
@@ -14450,6 +14657,7 @@ unsafe fn save_settings(st: &State) {
     out.push_str(&format!("key_side={}\r\n", b(st.key_side)));
     out.push_str(&format!("hover_name={}\r\n", b(st.hover_name)));
     out.push_str(&format!("glass={}\r\n", b(st.glass)));
+    out.push_str(&format!("glass_live={}\r\n", b(st.glass_live)));
     out.push_str(&format!("key_rhold={}\r\n", b(st.key_rhold)));
     out.push_str(&format!("autostart={}\r\n", b(st.autostart)));
     out.push_str(&format!("guide_seen={}\r\n", b(st.guide_seen)));
@@ -16018,6 +16226,8 @@ fn main() {
         SetWindowLongPtrW(rhwnd, GWLP_USERDATA, p as isize);
         MAIN_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
         RING_HWND.store(rhwnd.0 as isize, Ordering::SeqCst);
+        // 实时玻璃的后台抓屏线程（菜单没开时它挂在条件变量上，0 唤醒）
+        glass_live_spawn();
 
         // 在线升级：启动静默检查（**只查不装**）。首次启动必查，之后 ≥6h 一次（防限流）。
         // 后台线程 sleep 3s 再联网，避免和启动抢资源；结果 post 回 UI 刷关于页。
